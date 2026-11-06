@@ -5,14 +5,16 @@ style of SC2: info on the left, the selected building's queue in the middle,
 a 4x3 button grid on the right. Each button sits in a fixed grid slot and
 its hotkey is the key at the same position on the keyboard (``GRID_KEYS``:
 QWER / ASDF / ZXCV). ``Panel.buttons`` lists what the selection can do;
-``InputController`` handles clicks and hotkeys, ``Panel.draw`` draws it.
+workers have a Build button (Z) that opens the build menu (``menu="build"``)
+listing ``BUILDABLE`` buildings plus Back (V). ``InputController`` handles
+clicks and hotkeys, ``Panel.draw`` draws it.
 """
 
 from dataclasses import dataclass
 
 import pygame
 
-from rtstest.sim.buildings import MAX_QUEUE, Building
+from rtstest.sim.buildings import BUILDABLE, MAX_QUEUE, Building, BuildingType
 from rtstest.sim.game import Game
 from rtstest.sim.units import SOLDIER, WORKER, Unit, UnitType
 from rtstest.ui.assets import SpriteCache
@@ -38,19 +40,34 @@ TEXT_COLOR = (230, 230, 230)
 DIM_TEXT = (150, 150, 160)
 WARN_TEXT = (240, 120, 100)
 PROGRESS_COLOR = (120, 230, 240)
-HELP_LINES = ("LMB select / drag box    RMB move, gather, attack, set rally",
+HELP_LINES = ("LMB select / drag box    RMB move, gather, attack, rally, resume build",
               "Arrows / screen edge scroll    wheel zoom    Esc quit")
 
 
 @dataclass(frozen=True)
 class Button:
-    """One command in grid ``slot``: train a unit type, or start targeting for a unit action."""
+    """One command in grid ``slot``.
+
+    Actions: ``train`` a unit type, ``place`` a building type, open the
+    ``build`` menu, go ``back`` from it, or start targeting for a unit action
+    (``move``, ``attack``, ``gather``).
+    """
 
     action: str
     label: str
     slot: int
     icon: str
     unit_type: UnitType | None = None
+    building_type: BuildingType | None = None
+
+    @property
+    def cost(self) -> int | None:
+        """Resource cost shown on the button, if any."""
+        if self.unit_type is not None:
+            return self.unit_type.cost
+        if self.building_type is not None:
+            return self.building_type.cost
+        return None
 
     @property
     def hotkey(self) -> int:
@@ -62,6 +79,8 @@ TRAIN_SLOTS = {WORKER.name: 0, SOLDIER.name: 1}
 MOVE_BUTTON = Button("move", "Move", 0, "move")
 ATTACK_BUTTON = Button("attack", "Attack", 4, "attack")
 GATHER_BUTTON = Button("gather", "Gather", 5, "resource")
+BUILD_BUTTON = Button("build", "Build", 8, "build")
+BACK_BUTTON = Button("back", "Back", 11, "back")
 
 
 def selected_units(game: Game, player_id: int, selection: set[int]) -> list[Unit]:
@@ -92,16 +111,26 @@ class Panel:
         self.font = font
         self.small = pygame.font.Font(None, 16)
 
-    def buttons(self, game: Game, player_id: int, selection: set[int]) -> list[Button]:
-        """Unit actions when own units are selected, else the selected building's train buttons."""
+    def buttons(self, game: Game, player_id: int, selection: set[int],
+                menu: str | None = None) -> list[Button]:
+        """Buttons for the selection.
+
+        Own units: unit actions, or the build menu when ``menu == "build"``
+        and workers are selected. Otherwise the selected complete building's
+        train buttons.
+        """
         units = selected_units(game, player_id, selection)
         if units:
-            buttons = [MOVE_BUTTON]
-            if any(u.type.gather_capacity for u in units):
-                buttons.append(GATHER_BUTTON)
-            return buttons + [ATTACK_BUTTON]
+            workers = any(u.type.gather_capacity for u in units)
+            if menu == "build" and workers:
+                return [Button("place", b.name.capitalize(), i, b.name, building_type=b)
+                        for i, b in enumerate(BUILDABLE)] + [BACK_BUTTON]
+            buttons = [MOVE_BUTTON, ATTACK_BUTTON]
+            if workers:
+                buttons += [GATHER_BUTTON, BUILD_BUTTON]
+            return buttons
         building = selected_building(game, player_id, selection)
-        if building is None:
+        if building is None or not building.complete:
             return []
         return [Button("train", t.name.capitalize(), TRAIN_SLOTS.get(t.name, i), t.name, t)
                 for i, t in enumerate(building.type.trains)]
@@ -139,17 +168,18 @@ class Panel:
         return None
 
     def draw(self, screen: pygame.Surface, game: Game, player_id: int,
-             selection: set[int], targeting: str | None) -> None:
-        """Draw the whole panel."""
+             selection: set[int], targeting: str | None, menu: str | None = None) -> None:
+        """Draw the whole panel; ``targeting`` is an action name or ``"place"``."""
         size = screen.get_size()
         rect = panel_rect(size)
         screen.fill(PANEL_BG, rect)
         pygame.draw.line(screen, PANEL_BORDER, rect.topleft, rect.topright, 2)
         building = selected_building(game, player_id, selection)
         self._draw_info(screen, rect, game, player_id, selection, building, targeting)
-        if building is not None and not selected_units(game, player_id, selection):
+        if (building is not None and building.complete
+                and not selected_units(game, player_id, selection)):
             self._draw_queue(screen, size, game, building)
-        self._draw_buttons(screen, size, game, player_id, selection, targeting)
+        self._draw_buttons(screen, size, game, player_id, selection, targeting, menu)
 
     def _text(self, screen: pygame.Surface, text: str, pos: tuple[int, int],
               color=TEXT_COLOR, font: pygame.font.Font | None = None) -> None:
@@ -158,7 +188,10 @@ class Panel:
     def _draw_info(self, screen, rect, game, player_id, selection, building, targeting) -> None:
         x, y = rect.left + PAD, rect.top + PAD
         lines: list[tuple[str, tuple[int, int, int]]] = []
-        if targeting is not None:
+        if targeting == "place":
+            lines.append(("Place building: left-click site, right-click / Esc cancel",
+                          BUTTON_ACTIVE))
+        elif targeting is not None:
             lines.append((f"{targeting.capitalize()}: left-click target, "
                           "right-click / Esc cancel", BUTTON_ACTIVE))
         units = selected_units(game, player_id, selection)
@@ -177,7 +210,12 @@ class Panel:
         elif building is not None:
             lines.append((building.type.name.capitalize(), TEXT_COLOR))
             lines.append((f"HP {max(0, round(building.hp))} / {building.max_hp}", DIM_TEXT))
-            lines.append(("RMB sets rally point", DIM_TEXT))
+            if building.complete:
+                lines.append(("RMB sets rally point", DIM_TEXT))
+            else:
+                lines.append((f"Under construction {round(building.build_fraction * 100)}%",
+                              WARN_TEXT))
+                lines.append(("RMB with a worker on it to continue building", DIM_TEXT))
         else:
             lines.extend((line, DIM_TEXT) for line in HELP_LINES)
         for i, (text, color) in enumerate(lines):
@@ -206,8 +244,8 @@ class Panel:
                 self._text(screen, "Waiting for resources", (front.left, front.bottom + 3),
                            WARN_TEXT, self.small)
 
-    def _draw_buttons(self, screen, size, game, player_id, selection, targeting) -> None:
-        buttons = self.buttons(game, player_id, selection)
+    def _draw_buttons(self, screen, size, game, player_id, selection, targeting, menu) -> None:
+        buttons = self.buttons(game, player_id, selection, menu)
         color = game.players[player_id].color
         resources = game.players[player_id].resources
         for button in buttons:
@@ -216,13 +254,13 @@ class Panel:
             active = button.action == targeting
             pygame.draw.rect(screen, BUTTON_ACTIVE if active else PANEL_BORDER, rect,
                              2 if active else 1)
-            tint = color if button.unit_type is not None else None
+            tint = color if button.unit_type or button.building_type else None
             icon = self.sprites.get(button.icon, (BUTTON_SIZE - 12, BUTTON_SIZE - 12), tint)
             screen.blit(icon, icon.get_rect(center=rect.center))
             self._text(screen, pygame.key.name(button.hotkey).upper(),
                        (rect.left + 3, rect.top + 2), TEXT_COLOR, self.small)
-            if button.unit_type is not None:
-                cost = button.unit_type.cost
+            cost = button.cost
+            if cost is not None:
                 label = self.small.render(str(cost), True,
                                           TEXT_COLOR if resources >= cost else WARN_TEXT)
                 screen.blit(label, label.get_rect(bottomright=(rect.right - 3, rect.bottom - 2)))

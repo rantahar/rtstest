@@ -10,7 +10,8 @@ Units reserve the cell they intend to stop on (``Grid.reserve``): a move
 destination, a mining spot next to a resource, or a cell in range of an
 attack target. A unit holds at most one reservation; it is released when the
 order changes, when a worker leaves to deposit, and when the unit dies
-(``release_reservation``). Workers check at most one resource cell per tick
+(``release_reservation``). ``Build`` sends a worker to a site; it places
+and pays for the building on arrival and stays to construct it. Workers check at most one resource cell per tick
 for a free mining spot, taking over a spot held by a friendly non-gathering
 unit if needed, and otherwise switch to a random nearby resource.
 """
@@ -25,6 +26,7 @@ from rtstest.world.grid import Cell, Grid, Terrain
 from rtstest.world.pathfinding import find_path, find_path_adjacent, find_stand_cell
 
 if TYPE_CHECKING:
+    from rtstest.sim.buildings import BuildingType
     from rtstest.sim.game import Entity, Game
 
 REPATH_INTERVAL = 0.5
@@ -35,6 +37,7 @@ DEPOSIT_RANGE = 1.0
 GATHER_SWITCH_RADIUS = 3
 ATTACK_MAX_RING = 3
 MOVE_MAX_RING = 4
+BUILD_RANGE = 1.0
 
 
 @dataclass(frozen=True)
@@ -94,7 +97,19 @@ class AttackMove:
     claimed: bool = False
 
 
-Order = Union[Move, Gather, Attack, AttackMove, None]
+@dataclass
+class Build:
+    """Construct a building with top-left ``cell``, or resume ``building_id``.
+
+    The site is placed and paid for when the worker arrives next to it.
+    """
+
+    btype: BuildingType
+    cell: Cell
+    building_id: int | None = None
+
+
+Order = Union[Move, Gather, Attack, AttackMove, Build, None]
 
 
 def _touches(a: Cell, b: Cell) -> bool:
@@ -208,6 +223,8 @@ class Unit:
             self._gather(game, dt)
         elif isinstance(order, AttackMove):
             self._attack_move(game, dt)
+        elif isinstance(order, Build):
+            self._build(game, dt)
         else:
             self._attack(game, dt)
 
@@ -299,6 +316,56 @@ class Unit:
                 self.release_reservation()
                 self.path = find_path_adjacent(self.grid, self.cell, cells) or []
         self._step(game, dt)
+
+    def _build(self, game: Game, dt: float) -> None:
+        """Walk next to the site, start construction on arrival, then keep building.
+
+        Only one worker builds a building: another worker that arrives while
+        the current builder is still building gives up.
+        """
+        order = self.order
+        building = None
+        if order.building_id is not None:
+            building = game.buildings.get(order.building_id)
+            if building is None or building.complete:
+                self.set_order(None)
+                return
+            footprint = building.cells()
+        else:
+            w, h = order.btype.size
+            footprint = [(order.cell[0] + dx, order.cell[1] + dy)
+                         for dy in range(h) for dx in range(w)]
+        x0, y0 = footprint[0]
+        x1, y1 = footprint[-1]
+        if point_rect_distance(self.x, self.y, (x0, y0, x1 + 1, y1 + 1)) > BUILD_RANGE:
+            if not self.path:
+                stand = find_stand_cell(self.grid, self.cell, footprint, self.id, 1, 2)
+                if stand is not None and self._reserve(stand):
+                    path = find_path(self.grid, self.cell, stand)
+                else:
+                    path = find_path_adjacent(self.grid, self.cell, footprint)
+                if path is None:
+                    self.set_order(None)
+                    return
+                self.path = path or [self.cell]
+            self._step(game, dt)
+            return
+        self.path = []
+        if building is None:
+            building = game.start_construction(self, order.btype, order.cell)
+            if building is None:
+                self.set_order(None)
+                return
+            order.building_id = building.id
+        if not game.is_building(building.builder, building.id, self):
+            building.builder = self.id
+        if building.builder != self.id:
+            self.set_order(None)
+            return
+        if self.reserved != self.cell:
+            self._reserve(self.cell)
+        if building.construct(dt):
+            self.set_order(None)
 
     def _gather(self, game: Game, dt: float) -> None:
         order = self.order

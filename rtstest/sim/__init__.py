@@ -4,13 +4,16 @@ Modules:
 
 - ``game``: ``Game`` holds the whole state, advances it with ``step()``,
   answers world queries and exposes the command interface (``order_move``,
-  ``order_gather``, ``order_attack``, ``order_attack_move``, ``set_rally``,
-  ``train``, ``cancel_training``) used by UI and AI alike.
+  ``order_gather``, ``order_attack``, ``order_attack_move``, ``order_build``,
+  ``order_resume``, ``set_rally``, ``train``, ``cancel_training``) used by UI
+  and AI alike; ``can_place`` checks building sites.
 - ``units``: ``UnitType`` stats (``WORKER``, ``SOLDIER``, ``CREEP``),
-  orders (``Move``, ``Gather``, ``Attack``, ``AttackMove``) and ``Unit``
-  behaviour.
-- ``buildings``: ``BuildingType`` (``BASE``) and ``Building`` with a
-  5-slot training queue (paid when training starts) and rally point.
+  orders (``Move``, ``Gather``, ``Attack``, ``AttackMove``, ``Build``) and
+  ``Unit`` behaviour.
+- ``buildings``: ``BuildingType`` (``BASE`` trains workers and stores
+  resources, ``BARRACKS`` trains soldiers; ``BUILDABLE`` lists what workers
+  can build) and ``Building`` with construction progress, a 5-slot training
+  queue (paid when training starts) and rally point.
 - ``players``: ``Player`` (resources, colour) and ``HAZARD_OWNER``.
 - ``steering``: ``apply_pushback``, which separates overlapping units
   (called by ``Game.step``).

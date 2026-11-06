@@ -5,7 +5,8 @@ import math
 
 from rtstest.sim.game import TICK, Game
 from rtstest.sim.players import HAZARD_OWNER, STARTING_RESOURCES
-from rtstest.sim.units import CREEP, SOLDIER, WORKER, Gather, Move
+from rtstest.sim.buildings import BARRACKS, BASE
+from rtstest.sim.units import CREEP, SOLDIER, WORKER, Build, Gather, Move
 from rtstest.world.grid import Cell, Grid, Terrain, chebyshev
 from rtstest.world.mapgen import MapInfo
 from rtstest.world.pathfinding import ring_cells
@@ -66,11 +67,11 @@ def test_queue_waits_for_resources():
     base = game.buildings_of(0)[0]
     game.players[0].resources = 0
     before = len(game.units_of(0))
-    assert game.train(base.id, SOLDIER)
-    _run(game, SOLDIER.train_time + 2)
+    assert game.train(base.id, WORKER)
+    _run(game, WORKER.train_time + 2)
     assert len(game.units_of(0)) == before
-    game.players[0].resources = SOLDIER.cost
-    _run(game, SOLDIER.train_time + 1)
+    game.players[0].resources = WORKER.cost
+    _run(game, WORKER.train_time + 1)
     assert len(game.units_of(0)) == before + 1
     assert game.players[0].resources == 0
 
@@ -79,7 +80,7 @@ def test_cancel_refunds_paid_front_only():
     game = _small_game()
     base = game.buildings_of(0)[0]
     game.train(base.id, WORKER)
-    game.train(base.id, SOLDIER)
+    game.train(base.id, WORKER)
     game.step()
     game.cancel_training(base.id, 1)
     assert game.players[0].resources == STARTING_RESOURCES - WORKER.cost
@@ -262,3 +263,93 @@ def test_miner_does_not_displace_other_players_units():
     _run(game, 5)
     assert other.reserved == spot
     assert worker.reserved != spot
+
+
+def test_base_trains_only_workers():
+    game = _small_game()
+    base = game.buildings_of(0)[0]
+    assert not game.train(base.id, SOLDIER)
+
+
+def test_can_place_rules():
+    game = _open_game()
+    assert game.can_place(BARRACKS, (15, 15), 0)
+    assert not game.can_place(BARRACKS, (2, 2), 0)
+    game.grid.set_terrain((16, 16), Terrain.ROCK)
+    assert not game.can_place(BARRACKS, (15, 15), 0)
+    miner = game.spawn_unit(WORKER, 0, (20, 20))
+    miner.set_order(Gather((25, 25)))
+    game.grid.reserve((21, 21), miner.id)
+    miner.reserved = (21, 21)
+    assert not game.can_place(BARRACKS, (20, 20), 0)
+
+
+def _build_barracks(game: Game, cell=(15, 15)):
+    worker = game.units_of(0)[0]
+    game.players[0].resources = 1000
+    assert game.order_build([worker.id], BARRACKS, cell)
+    return worker
+
+
+def test_construction_pays_on_start_and_completes():
+    game = _open_game()
+    worker = _build_barracks(game)
+    assert game.players[0].resources == 1000
+    _run(game, 8)
+    site = [b for b in game.buildings_of(0) if b.type is BARRACKS]
+    assert len(site) == 1 and not site[0].complete
+    assert game.players[0].resources == 1000 - BARRACKS.cost
+    assert isinstance(worker.order, Build)
+    assert not game.train(site[0].id, SOLDIER)
+    _run(game, BARRACKS.build_time)
+    assert site[0].complete and site[0].hp == BARRACKS.max_hp
+    assert worker.order is None
+    assert game.train(site[0].id, SOLDIER)
+    _run(game, SOLDIER.train_time + 1)
+    assert any(u.type is SOLDIER for u in game.units_of(0))
+
+
+def test_construction_stops_without_worker_and_resumes():
+    game = _open_game()
+    worker = _build_barracks(game)
+    _run(game, 10)
+    site = [b for b in game.buildings_of(0) if b.type is BARRACKS][0]
+    worker.hp = 0
+    game.step()
+    progress = site.build_progress
+    _run(game, 5)
+    assert site.build_progress == progress
+    other = game.units_of(0)[0]
+    assert game.order_resume([other.id], site.id)
+    _run(game, BARRACKS.build_time + 10)
+    assert site.complete
+
+
+def test_one_builder_per_building():
+    game = _open_game()
+    builder = _build_barracks(game)
+    _run(game, 8)
+    site = [b for b in game.buildings_of(0) if b.type is BARRACKS][0]
+    helper = next(u for u in game.units_of(0) if u is not builder)
+    game.order_resume([helper.id], site.id)
+    _run(game, 8)
+    assert helper.order is None
+    assert site.builder == builder.id
+
+
+def test_unfinished_building_does_not_store_resources():
+    game = _open_game()
+    worker = _build_barracks(game)
+    _run(game, 8)
+    site = [b for b in game.buildings_of(0) if b.type is BARRACKS][0]
+    assert game.nearest_base(0, site.center[0], site.center[1]).type is BASE
+
+
+def test_ai_builds_barracks_and_soldiers():
+    game = Game(seed=1, human_player=None)
+    game.hazard.next_wave_time = 1e9
+    _run(game, 240)
+    for p in game.players:
+        types = {b.type for b in game.buildings_of(p.id) if b.complete}
+        assert BARRACKS in types
+        assert any(u.type is SOLDIER for u in game.units_of(p.id))

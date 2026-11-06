@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Placeholder Build command icon: a hammer. Not tinted. -->
+  <path d="M30 26 L12 56" stroke="#8a5a2a" stroke-width="7" stroke-linecap="round"/>
+  <path d="M18 14 L46 8 L54 22 L40 30 Z" fill="#b0b0b8" stroke="#303038" stroke-width="3" stroke-linejoin="round"/>
+</svg>

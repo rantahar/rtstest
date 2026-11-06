@@ -1,12 +1,18 @@
-"""Buildings: rectangular grid footprints that store resources and train units.
+"""Buildings: rectangular grid footprints that train units; bases also store resources.
 
-A building's ``cell`` is its top-left footprint cell. Up to ``MAX_QUEUE``
-units can be queued for free; a unit is paid for when its training starts at
-the front of the queue, and the queue waits until the owner can afford it.
-Training takes ``train_time``, then the unit spawns on a free cell next to
-the footprint. Cancelling the front unit refunds it if it was paid. If the building has
-a rally point, each new unit's first order goes there: gather when the rally
-point is a resource cell and the unit can gather, otherwise move.
+A building's ``cell`` is its top-left footprint cell. Buildings are
+constructed SC/WC style: one worker stays next to the site while
+``construct`` advances it; the building starts at ``START_HP_FRACTION`` of
+its hp and gains hp as it is built. An unfinished building blocks its cells
+and can be attacked, but trains nothing and takes no deposits.
+
+Up to ``MAX_QUEUE`` units can be queued for free; a unit is paid for when
+its training starts at the front of the queue, and the queue waits until the
+owner can afford it. Training takes ``train_time``, then the unit spawns on a
+free cell next to the footprint. Cancelling the front unit refunds it if it
+was paid. If the building has a rally point, each new unit's first order goes
+there: gather when the rally point is a resource cell and the unit can
+gather, otherwise move.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ if TYPE_CHECKING:
     from rtstest.sim.game import Entity, Game
 
 MAX_QUEUE = 5
+START_HP_FRACTION = 0.1
 
 
 @dataclass(frozen=True)
@@ -31,21 +38,31 @@ class BuildingType:
     max_hp: int
     size: tuple[int, int]
     trains: tuple[UnitType, ...] = ()
+    cost: int = 0
+    build_time: float = 0.0
+    stores_resources: bool = False
 
 
-BASE = BuildingType("base", 600, (3, 3), (WORKER, SOLDIER))
+BASE = BuildingType("base", 600, (3, 3), (WORKER,), cost=400, build_time=60.0,
+                    stores_resources=True)
+BARRACKS = BuildingType("barracks", 400, (3, 3), (SOLDIER,), cost=150, build_time=30.0)
+BUILDABLE = (BARRACKS,)
 
 
 class Building:
     """A static entity on the grid, owned by a player."""
 
-    def __init__(self, bid: int, btype: BuildingType, owner: int, cell: Cell) -> None:
+    def __init__(self, bid: int, btype: BuildingType, owner: int, cell: Cell,
+                 complete: bool = True) -> None:
         self.id = bid
         self.type = btype
         self.owner = owner
         self.cell = cell
-        self.hp = float(btype.max_hp)
         self.max_hp = btype.max_hp
+        self.complete = complete
+        self.build_progress = btype.build_time if complete else 0.0
+        self.builder: int | None = None
+        self.hp = float(btype.max_hp) if complete else btype.max_hp * START_HP_FRACTION
         self.queue: list[UnitType] = []
         self.progress = 0.0
         self.paid = False
@@ -76,16 +93,36 @@ class Building:
         """Lose hp; buildings do not fight back."""
         self.hp -= amount
 
+    @property
+    def build_fraction(self) -> float:
+        """Construction progress from 0 to 1."""
+        if self.type.build_time <= 0:
+            return 1.0
+        return min(1.0, self.build_progress / self.type.build_time)
+
+    def construct(self, dt: float) -> bool:
+        """Advance construction by ``dt`` seconds of work; True when it completes."""
+        if self.complete:
+            return True
+        before = self.build_fraction
+        self.build_progress += dt
+        gained = (self.build_fraction - before) * self.max_hp * (1 - START_HP_FRACTION)
+        self.hp = min(float(self.max_hp), self.hp + gained)
+        if self.build_progress >= self.type.build_time:
+            self.complete = True
+            self.builder = None
+        return self.complete
+
     def can_enqueue(self, utype: UnitType) -> bool:
-        """Whether this building trains ``utype`` and has queue space."""
-        return utype in self.type.trains and len(self.queue) < MAX_QUEUE
+        """Whether this building is complete, trains ``utype`` and has queue space."""
+        return self.complete and utype in self.type.trains and len(self.queue) < MAX_QUEUE
 
     def update(self, game: Game, dt: float) -> None:
         """Advance training; spawn the front unit when done and a cell is free.
 
         A spawned unit is sent to the rally point, if one is set.
         """
-        if not self.queue:
+        if not self.complete or not self.queue:
             return
         front = self.queue[0]
         if not self.paid:

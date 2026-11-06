@@ -4,9 +4,10 @@ import pygame
 
 from rtstest.sim.game import Game
 from rtstest.sim.players import HAZARD_OWNER
+from rtstest.sim.buildings import BuildingType
 from rtstest.ui.assets import SpriteCache
 from rtstest.ui.panel import Panel
-from rtstest.world.grid import Grid, Terrain
+from rtstest.world.grid import Cell, Grid, Terrain
 
 DEFAULT_TILE = 32
 MIN_TILE = 16
@@ -24,6 +25,10 @@ SELECT_COLOR = (240, 240, 120)
 HP_BACK = (40, 0, 0)
 HP_FRONT = (90, 220, 90)
 CARRY_COLOR = (120, 230, 240)
+BUILD_COLOR = (240, 170, 60)
+GHOST_OK = (90, 230, 90)
+GHOST_BAD = (230, 70, 70)
+UNFINISHED_ALPHA = 130
 HUD_BG = (20, 20, 28)
 TEXT_COLOR = (230, 230, 230)
 OVERLAY_COLOR = (0, 0, 0, 160)
@@ -104,15 +109,18 @@ class Renderer:
 
     def draw(self, game: Game, camera: Camera, player_id: int,
              selection: set[int], drag_rect: pygame.Rect | None,
-             targeting: str | None = None) -> None:
-        """Draw the map, entities, selection box, HUD and lower panel."""
+             targeting: str | None = None, menu: str | None = None,
+             ghost: tuple[BuildingType, Cell, bool] | None = None) -> None:
+        """Draw the map, entities, placement ghost, selection box, HUD and lower panel."""
         self.screen.fill(BACKGROUND)
         self._draw_tiles(game, camera)
         self._draw_buildings(game, camera, selection)
         self._draw_units(game, camera, selection)
+        if ghost is not None:
+            self._draw_ghost(game, camera, player_id, *ghost)
         if drag_rect is not None:
             pygame.draw.rect(self.screen, SELECT_COLOR, drag_rect, 1)
-        self.panel.draw(self.screen, game, player_id, selection, targeting)
+        self.panel.draw(self.screen, game, player_id, selection, targeting, menu)
         self._draw_hud(game, player_id, selection)
 
     def _draw_tiles(self, game: Game, camera: Camera) -> None:
@@ -133,8 +141,16 @@ class Renderer:
             w, h = b.type.size
             sx, sy = camera.world_to_screen(*b.cell)
             color = game.players[b.owner].color
-            self.screen.blit(self.sprites.get(b.type.name, (w * t, h * t), color), (sx, sy))
+            sprite = self.sprites.get(b.type.name, (w * t, h * t), color)
+            if not b.complete:
+                sprite = sprite.copy()
+                sprite.set_alpha(UNFINISHED_ALPHA)
+            self.screen.blit(sprite, (sx, sy))
             rect = pygame.Rect(sx, sy, w * t, h * t)
+            if not b.complete:
+                pygame.draw.rect(self.screen, BUILD_COLOR,
+                                 (rect.left, rect.bottom + 2,
+                                  round(rect.width * b.build_fraction), 3))
             if b.id in selection:
                 pygame.draw.rect(self.screen, SELECT_COLOR, rect, 2)
                 if b.rally is not None:
@@ -146,6 +162,17 @@ class Renderer:
                 frac = min(1.0, b.progress / b.queue[0].train_time)
                 pygame.draw.rect(self.screen, CARRY_COLOR,
                                  (rect.left, rect.bottom + 2, round(rect.width * frac), 3))
+
+    def _draw_ghost(self, game: Game, camera: Camera, player_id: int,
+                    btype: BuildingType, cell: Cell, valid: bool) -> None:
+        """Translucent footprint of a building being placed, outlined green or red."""
+        t = camera.tile
+        w, h = btype.size
+        sx, sy = camera.world_to_screen(*cell)
+        sprite = self.sprites.get(btype.name, (w * t, h * t), game.players[player_id].color).copy()
+        sprite.set_alpha(UNFINISHED_ALPHA)
+        self.screen.blit(sprite, (sx, sy))
+        pygame.draw.rect(self.screen, GHOST_OK if valid else GHOST_BAD, (sx, sy, w * t, h * t), 2)
 
     def _draw_units(self, game: Game, camera: Camera, selection: set[int]) -> None:
         size = max(4, round(camera.tile * UNIT_SPRITE_SCALE))

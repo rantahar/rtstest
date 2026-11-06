@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             game.step()
             accumulator -= TICK
         renderer.draw(game, camera, HUMAN_PLAYER, controller.selection, controller.drag_rect(),
-                      controller.targeting)
+                      controller.targeting, controller.menu, controller.ghost())
         pygame.display.flip()
         frames += 1
         if args.frames and frames >= args.frames:

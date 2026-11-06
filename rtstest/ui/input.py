@@ -1,15 +1,18 @@
 """Mouse and keyboard handling: selection, orders, panel commands and camera control.
 
-Right-click gives the automatic order (attack, gather, move, or a rally point
-for a selected building). Panel buttons and their hotkeys either train units
-or start targeting mode, where the next left-click on the map gives that
-order and right-click or Esc cancels.
+Right-click gives the automatic order (attack, gather, resume building an
+own unfinished building, move, or a rally point for a selected building).
+Panel buttons and their hotkeys either train units, open the build menu, or
+start targeting mode, where the next left-click on the map gives that order
+and right-click or Esc cancels. Placing a building is a targeting mode that
+shows a ghost footprint under the mouse.
 """
 
 import math
 
 import pygame
 
+from rtstest.sim.buildings import Building, BuildingType
 from rtstest.sim.game import Game
 from rtstest.sim.units import SOLDIER, WORKER, UnitType
 from rtstest.ui.panel import Button, Panel, panel_rect, selected_building, selected_units
@@ -32,6 +35,8 @@ class InputController:
         self.player_id = player_id
         self.selection: set[int] = set()
         self.targeting: str | None = None
+        self.menu: str | None = None
+        self.placing: BuildingType | None = None
         self._drag_start: tuple[int, int] | None = None
         self._drag_now: tuple[int, int] | None = None
 
@@ -44,12 +49,14 @@ class InputController:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 3):
             if panel_rect(self._screen_size).collidepoint(event.pos):
                 self._panel_click(event.pos, event.button)
+            elif event.button == 1 and self.targeting == "place":
+                self._place(event.pos)
             elif event.button == 1 and self.targeting is not None:
                 self._target(event.pos)
             elif event.button == 1:
                 self._drag_start = self._drag_now = event.pos
-            elif self.targeting is not None:
-                self.targeting = None
+            elif self.targeting is not None or self.menu is not None:
+                self.cancel_targeting()
             else:
                 self._command(event.pos)
         elif event.type == pygame.MOUSEMOTION and self._drag_start is not None:
@@ -64,10 +71,28 @@ class InputController:
             self._hotkey(event.key)
 
     def cancel_targeting(self) -> bool:
-        """Leave targeting mode; False if it was not active."""
-        was_targeting = self.targeting is not None
-        self.targeting = None
-        return was_targeting
+        """Leave targeting/placing mode, else close the build menu; False if neither was open."""
+        if self.targeting is not None:
+            self.targeting = None
+            self.placing = None
+            return True
+        if self.menu is not None:
+            self.menu = None
+            return True
+        return False
+
+    def ghost(self) -> tuple[BuildingType, tuple[int, int], bool] | None:
+        """While placing: (building type, top-left cell under the mouse, placeable)."""
+        if self.targeting != "place" or self.placing is None:
+            return None
+        cell = self._site_cell(pygame.mouse.get_pos(), self.placing)
+        return self.placing, cell, self.game.can_place(self.placing, cell, self.player_id)
+
+    def _site_cell(self, pos: tuple[int, int], btype: BuildingType) -> tuple[int, int]:
+        """Top-left cell of a building centred on the cell under ``pos``."""
+        wx, wy = self.camera.screen_to_world(*pos)
+        w, h = btype.size
+        return (math.floor(wx) - w // 2, math.floor(wy) - h // 2)
 
     def update(self, dt: float) -> None:
         """Scroll with arrow keys or the screen edge; drop dead units from the selection."""
@@ -81,8 +106,15 @@ class InputController:
         self.camera.pan(dx * SCROLL_SPEED * dt, dy * SCROLL_SPEED * dt)
         self.camera.clamp(self.game.grid.width, self.game.grid.height)
         self.selection = {i for i in self.selection if self.game.entity(i) is not None}
-        if not selected_units(self.game, self.player_id, self.selection):
+        units = selected_units(self.game, self.player_id, self.selection)
+        if not units:
             self.targeting = None
+        if not any(u.type.gather_capacity for u in units):
+            self.menu = None
+            if self.targeting == "place":
+                self.targeting = None
+        if self.targeting != "place":
+            self.placing = None
 
     def drag_rect(self) -> pygame.Rect | None:
         """The selection box on screen while dragging, if any."""
@@ -114,14 +146,14 @@ class InputController:
                 self.game.cancel_training(building.id, index)
                 return
         if button == 1:
-            buttons = self.panel.buttons(self.game, self.player_id, self.selection)
+            buttons = self.panel.buttons(self.game, self.player_id, self.selection, self.menu)
             pressed = self.panel.hit_button(pos, self._screen_size, buttons)
             if pressed is not None:
                 self._activate(pressed)
 
     def _hotkey(self, key: int) -> None:
         """A key matching a panel button presses it; with nothing selected, Q/W train at the base."""
-        buttons = self.panel.buttons(self.game, self.player_id, self.selection)
+        buttons = self.panel.buttons(self.game, self.player_id, self.selection, self.menu)
         for button in buttons:
             if button.hotkey == key:
                 self._activate(button)
@@ -132,8 +164,24 @@ class InputController:
     def _activate(self, button: Button) -> None:
         if button.action == "train":
             self._train(button.unit_type)
+        elif button.action == "build":
+            self.menu = "build"
+        elif button.action == "back":
+            self.menu = None
+        elif button.action == "place":
+            self.placing = button.building_type
+            self.targeting = "place"
         else:
             self.targeting = button.action
+
+    def _place(self, pos: tuple[int, int]) -> None:
+        """Send a selected worker to build at the ghost; stay in placing mode if invalid."""
+        ids = [u.id for u in selected_units(self.game, self.player_id, self.selection)]
+        cell = self._site_cell(pos, self.placing)
+        if self.game.order_build(ids, self.placing, cell):
+            self.targeting = None
+            self.placing = None
+            self.menu = None
 
     def _target(self, pos: tuple[int, int]) -> None:
         """Give the targeting-mode order at a screen position, then leave targeting mode."""
@@ -168,6 +216,9 @@ class InputController:
         grid = self.game.grid
         if target is not None and target.owner != self.player_id:
             self.game.order_attack(ids, target.id)
+        elif (isinstance(target, Building) and not target.complete
+              and self.game.order_resume(ids, target.id)):
+            return
         elif grid.in_bounds(cell) and grid.terrain_at(cell) == Terrain.RESOURCE:
             self.game.order_gather(ids, cell)
         elif grid.in_bounds(cell):

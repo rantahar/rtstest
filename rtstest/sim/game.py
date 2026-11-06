@@ -1,9 +1,10 @@
 """Game state: map, players, units, buildings and the fixed-step update.
 
 ``Game.step`` advances everything by ``TICK`` seconds. Units, buildings, the
-hazard and the AI query the world through this object, and the ``order_*``,
-``set_rally``, ``train`` and ``cancel_training`` methods are the command
-interface shared by the UI and computer players. Hostility between owners is decided in one place,
+hazard and the AI query the world through this object, and the ``order_*``
+(including ``order_build`` and ``order_resume``), ``set_rally``, ``train`` and
+``cancel_training`` methods are the command interface shared by the UI and
+computer players. Hostility between owners is decided in one place,
 ``is_hostile``.
 """
 
@@ -20,7 +21,7 @@ from rtstest.sim.buildings import BASE, Building, BuildingType
 from rtstest.sim.hazard import Hazard
 from rtstest.sim.players import HAZARD_OWNER, make_players
 from rtstest.sim.steering import apply_pushback
-from rtstest.sim.units import WORKER, Attack, AttackMove, Gather, Move, Unit, UnitType
+from rtstest.sim.units import WORKER, Attack, AttackMove, Build, Gather, Move, Unit, UnitType
 from rtstest.world.grid import Cell, Terrain
 from rtstest.world.mapgen import MapInfo, generate
 from rtstest.world.pathfinding import ring_cells
@@ -73,9 +74,10 @@ class Game:
         self.units[unit.id] = unit
         return unit
 
-    def place_building(self, btype: BuildingType, owner: int, cell: Cell) -> Building | None:
+    def place_building(self, btype: BuildingType, owner: int, cell: Cell,
+                       complete: bool = True) -> Building | None:
         """Create a building with top-left at ``cell`` if all its cells are passable."""
-        building = Building(0, btype, owner, cell)
+        building = Building(0, btype, owner, cell, complete)
         if not all(self.grid.is_passable(c) for c in building.cells()):
             return None
         building.id = self._new_id()
@@ -154,11 +156,65 @@ class Game:
         return best
 
     def nearest_base(self, owner: int, x: float, y: float) -> Building | None:
-        """The owner's building closest to a point (any building stores resources)."""
-        buildings = self.buildings_of(owner)
+        """The owner's complete resource-storing building closest to a point."""
+        buildings = [b for b in self.buildings_of(owner)
+                     if b.complete and b.type.stores_resources]
         if not buildings:
             return None
         return min(buildings, key=lambda b: math.hypot(b.center[0] - x, b.center[1] - y))
+
+    @staticmethod
+    def footprint(btype: BuildingType, cell: Cell) -> list[Cell]:
+        """Cells a building of ``btype`` with top-left ``cell`` would cover."""
+        w, h = btype.size
+        return [(cell[0] + dx, cell[1] + dy) for dy in range(h) for dx in range(w)]
+
+    def can_place(self, btype: BuildingType, cell: Cell, owner: int) -> bool:
+        """Whether ``owner`` may place ``btype`` here.
+
+        Every cell must be passable and either unreserved or reserved by one
+        of the owner's own idle or moving units (which will be moved aside).
+        """
+        for c in self.footprint(btype, cell):
+            if not self.grid.is_passable(c):
+                return False
+            holder = self.units.get(self.grid.reserved_by(c))
+            if holder is not None and (holder.owner != owner
+                                       or not (holder.order is None
+                                               or isinstance(holder.order, Move))):
+                return False
+        return True
+
+    def start_construction(self, worker: Unit, btype: BuildingType,
+                           cell: Cell) -> Building | None:
+        """Pay for and place an unfinished building; None if blocked or unaffordable.
+
+        Units standing on the site are moved to free cells next to it.
+        """
+        player = self.players[worker.owner]
+        if player.resources < btype.cost or not self.can_place(btype, cell, worker.owner):
+            return None
+        cells = set(self.footprint(btype, cell))
+        for u in self.units.values():
+            if u.reserved in cells:
+                u.release_reservation()
+        building = self.place_building(btype, worker.owner, cell, complete=False)
+        if building is None:
+            return None
+        player.resources -= btype.cost
+        for u in self.units.values():
+            if u.cell in cells:
+                free = self.free_cell_near(cells)
+                if free is not None:
+                    u.x, u.y = free[0] + 0.5, free[1] + 0.5
+                    u.path = []
+        return building
+
+    def is_building(self, uid: int | None, building_id: int, other: Unit) -> bool:
+        """Whether unit ``uid`` (not ``other``) is currently constructing the building."""
+        unit = self.units.get(uid)
+        return (unit is not None and unit is not other and isinstance(unit.order, Build)
+                and unit.order.building_id == building_id)
 
     def is_displaceable_by(self, uid: int, miner: Unit) -> bool:
         """Whether unit ``uid`` must give up its cell to ``miner``: friendly and not gathering."""
@@ -282,6 +338,30 @@ class Game:
             return
         for i, u in enumerate(units):
             u.set_order(AttackMove(targets[i % len(targets)]))
+
+    def order_build(self, unit_ids: Iterable[int], btype: BuildingType, cell: Cell) -> bool:
+        """Send one worker from the units to build ``btype`` with top-left ``cell``.
+
+        The nearest worker to the site is chosen; False if there is none or
+        the site is not placeable now.
+        """
+        workers = [u for u in self._units(unit_ids) if u.type.gather_capacity]
+        if not workers or not self.can_place(btype, cell, workers[0].owner):
+            return False
+        cx, cy = cell[0] + btype.size[0] / 2, cell[1] + btype.size[1] / 2
+        worker = min(workers, key=lambda u: math.hypot(u.x - cx, u.y - cy))
+        worker.set_order(Build(btype, cell))
+        return True
+
+    def order_resume(self, unit_ids: Iterable[int], building_id: int) -> bool:
+        """Send one worker to continue an own unfinished building; False if not possible."""
+        b = self.buildings.get(building_id)
+        workers = [u for u in self._units(unit_ids) if u.type.gather_capacity]
+        if b is None or b.complete or not workers or workers[0].owner != b.owner:
+            return False
+        worker = min(workers, key=lambda u: math.hypot(u.x - b.center[0], u.y - b.center[1]))
+        worker.set_order(Build(b.type, b.cell, b.id))
+        return True
 
     def set_rally(self, building_id: int, cell: Cell | None) -> None:
         """Set (or clear with None) where a building sends the units it trains."""
