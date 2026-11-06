@@ -45,3 +45,16 @@ def test_mapgen_starts_have_room_and_resources():
         base = [(s[0] + dx, s[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
         assert all(info.grid.is_passable(c) for c in base)
         assert any(chebyshev(r, s) <= 10 for r in info.grid.resource_cells())
+
+
+def test_reservations():
+    g = Grid(5, 5)
+    assert g.reserve((1, 1), 7)
+    assert g.reserved_by((1, 1)) == 7
+    assert g.can_stand((1, 1), 7) and not g.can_stand((1, 1), 8)
+    assert not g.reserve((1, 1), 8)
+    assert g.is_passable((1, 1))
+    g.unreserve((1, 1), 8)
+    assert g.reserved_by((1, 1)) == 7
+    g.unreserve((1, 1), 7)
+    assert g.reserved_by((1, 1)) is None

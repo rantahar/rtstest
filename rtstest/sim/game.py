@@ -10,6 +10,7 @@ interface shared by the UI and computer players. Hostility between owners is dec
 from __future__ import annotations
 
 import math
+import random
 from collections import deque
 from collections.abc import Iterable, Iterator
 from typing import Union
@@ -18,6 +19,7 @@ from rtstest.sim.ai import ScriptedAI
 from rtstest.sim.buildings import BASE, Building, BuildingType
 from rtstest.sim.hazard import Hazard
 from rtstest.sim.players import HAZARD_OWNER, make_players
+from rtstest.sim.steering import apply_pushback
 from rtstest.sim.units import WORKER, Attack, AttackMove, Gather, Move, Unit, UnitType
 from rtstest.world.grid import Cell, Terrain
 from rtstest.world.mapgen import MapInfo, generate
@@ -48,6 +50,7 @@ class Game:
         self.units: dict[int, Unit] = {}
         self.buildings: dict[int, Building] = {}
         self.hazard = Hazard(seed)
+        self.rng = random.Random(seed + 2)
         self.time = 0.0
         self._next_id = 1
         self.ais = [ScriptedAI(p.id) for p in self.players if p.is_ai]
@@ -65,7 +68,7 @@ class Game:
     def spawn_unit(self, utype: UnitType, owner: int, cell: Cell,
                    scale: float = 1.0) -> Unit:
         """Create a unit at a cell; ``scale`` multiplies hp and damage."""
-        unit = Unit(self._new_id(), utype, owner, cell, scale)
+        unit = Unit(self._new_id(), utype, owner, cell, self.grid, scale)
         self.units[unit.id] = unit
         return unit
 
@@ -155,6 +158,20 @@ class Game:
         if not buildings:
             return None
         return min(buildings, key=lambda b: math.hypot(b.center[0] - x, b.center[1] - y))
+
+    def random_resource_near(self, cell: Cell, radius: int) -> Cell | None:
+        """A random resource cell other than ``cell`` within ``radius`` cells (square scan).
+
+        Falls back to the nearest resource anywhere when none is that close.
+        """
+        found = [(x, y)
+                 for y in range(cell[1] - radius, cell[1] + radius + 1)
+                 for x in range(cell[0] - radius, cell[0] + radius + 1)
+                 if (x, y) != cell and self.grid.in_bounds((x, y))
+                 and self.grid.terrain_at((x, y)) == Terrain.RESOURCE]
+        if found:
+            return self.rng.choice(found)
+        return self.nearest_resource(cell, math.inf)
 
     def nearest_resource(self, cell: Cell, radius: float) -> Cell | None:
         """The closest resource cell within ``radius`` cells, if any."""
@@ -275,10 +292,12 @@ class Game:
         for u in list(self.units.values()):
             if u.alive:
                 u.update(self, TICK)
+        apply_pushback(list(self.units.values()), self.grid, TICK)
         self._remove_dead()
 
     def _remove_dead(self) -> None:
         for uid in [uid for uid, u in self.units.items() if not u.alive]:
+            self.units[uid].release_reservation()
             del self.units[uid]
         for bid in [bid for bid, b in self.buildings.items() if not b.alive]:
             self.grid.release(self.buildings[bid].cells())

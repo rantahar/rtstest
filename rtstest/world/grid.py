@@ -2,6 +2,8 @@
 
 Cells are ``(x, y)`` integer tuples with ``(0, 0)`` at the top-left. Only
 grass cells not covered by a building are passable; units never block cells.
+A unit may reserve one cell as the place it will stop on (to work, attack or
+wait); a reservation does not block movement, only other units stopping there.
 """
 
 from collections.abc import Iterable, Iterator
@@ -38,6 +40,7 @@ class Grid:
         self._terrain = [[Terrain.GRASS] * width for _ in range(height)]
         self._resources: dict[Cell, int] = {}
         self._occupied: set[Cell] = set()
+        self._reserved: dict[Cell, int] = {}
 
     def in_bounds(self, cell: Cell) -> bool:
         """Whether the cell lies inside the map."""
@@ -90,6 +93,26 @@ class Grid:
     def release(self, cells: Iterable[Cell]) -> None:
         """Mark cells as no longer covered by a building."""
         self._occupied.difference_update(cells)
+
+    def reserved_by(self, cell: Cell) -> int | None:
+        """Id of the unit that reserved the cell as its stopping place, if any."""
+        return self._reserved.get(cell)
+
+    def can_stand(self, cell: Cell, uid: int) -> bool:
+        """Whether unit ``uid`` may stop on the cell: passable and not reserved by another unit."""
+        return self.is_passable(cell) and self._reserved.get(cell, uid) == uid
+
+    def reserve(self, cell: Cell, uid: int) -> bool:
+        """Reserve a cell for unit ``uid``; False if another unit holds it."""
+        if self._reserved.get(cell, uid) != uid:
+            return False
+        self._reserved[cell] = uid
+        return True
+
+    def unreserve(self, cell: Cell, uid: int) -> None:
+        """Drop unit ``uid``'s reservation of a cell (no-op if it does not hold it)."""
+        if self._reserved.get(cell) == uid:
+            del self._reserved[cell]
 
     def is_passable(self, cell: Cell) -> bool:
         """Whether a unit may stand on the cell."""

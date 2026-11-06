@@ -1,7 +1,7 @@
 """Tests for A* pathfinding."""
 
 from rtstest.world.grid import Grid, Terrain, chebyshev
-from rtstest.world.pathfinding import find_path, find_path_adjacent
+from rtstest.world.pathfinding import find_path, find_path_adjacent, find_stand_cell, ring_cells
 
 
 def _wall(height_gap: bool) -> Grid:
@@ -67,3 +67,21 @@ def test_adjacent_already_next_to_target():
     g = Grid(5, 5)
     g.set_terrain((2, 2), Terrain.RESOURCE)
     assert find_path_adjacent(g, (1, 1), [(2, 2)]) == []
+
+
+def test_stand_cell_nearest_free_in_ring():
+    g = Grid(10, 10)
+    assert find_stand_cell(g, (0, 5), [(5, 5)], uid=1) == (4, 5)
+    g.reserve((4, 5), 2)
+    assert find_stand_cell(g, (0, 5), [(5, 5)], uid=1) in {(4, 4), (4, 6)}
+    assert find_stand_cell(g, (0, 5), [(5, 5)], uid=2) == (4, 5)
+
+
+def test_stand_cell_ring_zero_and_outer_rings():
+    g = Grid(10, 10)
+    assert find_stand_cell(g, (0, 0), [(5, 5)], uid=1, min_ring=0, max_ring=2) == (5, 5)
+    for c in ring_cells([(5, 5)], 1):
+        g.reserve(c, 99)
+    stand = find_stand_cell(g, (0, 0), [(5, 5)], uid=1, min_ring=1, max_ring=2)
+    assert stand is not None and chebyshev(stand, (5, 5)) == 2
+    assert find_stand_cell(g, (0, 0), [(5, 5)], uid=1) is None

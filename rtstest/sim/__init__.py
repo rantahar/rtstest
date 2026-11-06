@@ -12,6 +12,8 @@ Modules:
 - ``buildings``: ``BuildingType`` (``BASE``) and ``Building`` with a
   5-slot training queue (paid when training starts) and rally point.
 - ``players``: ``Player`` (resources, colour) and ``HAZARD_OWNER``.
+- ``steering``: ``apply_pushback``, which separates overlapping units
+  (called by ``Game.step``).
 - ``hazard``: ``Hazard``, the growing waves of hostile creatures.
 - ``ai``: ``ScriptedAI``, rule-based computer players.
 """

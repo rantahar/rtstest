@@ -3,6 +3,9 @@
 Paths are lists of cells to walk through, excluding the start cell and
 including the final cell. Movement uses 8 neighbours with no corner cutting
 (see ``Grid.neighbours``). ``None`` means unreachable.
+
+``find_stand_cell`` picks where a unit should stop near a target: the
+nearest unreserved passable cell in rings around it.
 """
 
 import heapq
@@ -50,6 +53,39 @@ def find_path_adjacent(grid: Grid, start: Cell, targets: Iterable[Cell],
     goal_list = list(goals)
     return _astar(grid, start, goals.__contains__,
                   lambda c: min(octile(c, g) for g in goal_list), max_expansions)
+
+
+def ring_cells(targets: Iterable[Cell], ring: int) -> list[Cell]:
+    """Cells at Chebyshev distance ``ring`` from the bounding box of ``targets``.
+
+    Ring 0 is the box itself. Cells may be out of bounds.
+    """
+    xs = [c[0] for c in targets]
+    ys = [c[1] for c in targets]
+    x0, y0, x1, y1 = min(xs) - ring, min(ys) - ring, max(xs) + ring, max(ys) + ring
+    if ring == 0:
+        return [(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+    top = [(x, y0) for x in range(x0, x1 + 1)]
+    bottom = [(x, y1) for x in range(x0, x1 + 1)]
+    sides = [(x, y) for y in range(y0 + 1, y1) for x in (x0, x1)]
+    return top + bottom + sides
+
+
+def find_stand_cell(grid: Grid, start: Cell, targets: Iterable[Cell], uid: int,
+                    min_ring: int = 1, max_ring: int = 1) -> Cell | None:
+    """A cell where unit ``uid`` may stop near ``targets``, or None.
+
+    Searches rings around the targets from ``min_ring`` outwards and returns,
+    from the first ring with any candidate, the cell nearest to ``start``
+    that is passable and not reserved by another unit. Only the ring cells
+    are checked, never the unit list.
+    """
+    targets = list(targets)
+    for ring in range(min_ring, max_ring + 1):
+        candidates = [c for c in ring_cells(targets, ring) if grid.can_stand(c, uid)]
+        if candidates:
+            return min(candidates, key=lambda c: octile(c, start))
+    return None
 
 
 def _astar(grid: Grid, start: Cell, is_goal: Callable[[Cell], bool],

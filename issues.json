@@ -28,5 +28,11 @@
     "title": "Networking and multiplayer state",
     "status": "open",
     "description": "Networked multiplayer. New territory for the user, so interesting to explore. The simulation already runs in fixed ticks and every action goes through Game command methods, a starting point for lockstep (send commands, not state)."
+  },
+  {
+    "id": 6,
+    "title": "Pushback priority: workers push friendly units away from resources",
+    "status": "open",
+    "description": "Add priority to pushback. Workers push friendly units that are standing next to resources out of the way, so idle or parked units do not block mining spots."
   }
 ]

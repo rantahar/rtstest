@@ -5,6 +5,13 @@ A unit stands at a float position in cell units (the centre of cell
 current order: ``Move``, ``Gather``, ``Attack`` or ``AttackMove``. Idle combat units attack
 hostiles in sight (as decided by ``Game.nearest_hostile``); workers only
 act on orders.
+
+Units reserve the cell they intend to stop on (``Grid.reserve``): a move
+destination, a mining spot next to a resource, or a cell in range of an
+attack target. A unit holds at most one reservation; it is released when the
+order changes, when a worker leaves to deposit, and when the unit dies
+(``release_reservation``). Workers check at most one resource cell per tick
+for a free mining spot and otherwise switch to a random nearby resource.
 """
 
 from __future__ import annotations
@@ -13,8 +20,8 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union
 
-from rtstest.world.grid import Cell, Terrain, chebyshev
-from rtstest.world.pathfinding import find_path, find_path_adjacent
+from rtstest.world.grid import Cell, Grid, Terrain
+from rtstest.world.pathfinding import find_path, find_path_adjacent, find_stand_cell
 
 if TYPE_CHECKING:
     from rtstest.sim.game import Entity, Game
@@ -24,6 +31,9 @@ SCAN_INTERVAL = 0.5
 GATHER_TIME = 0.5
 GATHER_SEARCH_RADIUS = 10
 DEPOSIT_RANGE = 1.0
+GATHER_SWITCH_RADIUS = 3
+ATTACK_MAX_RING = 3
+MOVE_MAX_RING = 4
 
 
 @dataclass(frozen=True)
@@ -53,9 +63,10 @@ CREEP = UnitType("creep", 50, 1.8, 6, 1.2, 1.2, 8, 0, 0.0)
 
 @dataclass
 class Move:
-    """Walk to a cell."""
+    """Walk to a cell (moved to the nearest free cell when the order is claimed)."""
 
     target: Cell
+    claimed: bool = False
 
 
 @dataclass
@@ -79,9 +90,15 @@ class AttackMove:
 
     target: Cell
     engaged: int | None = None
+    claimed: bool = False
 
 
 Order = Union[Move, Gather, Attack, AttackMove, None]
+
+
+def _touches(a: Cell, b: Cell) -> bool:
+    """Whether two different cells are 8-neighbours."""
+    return a != b and max(abs(a[0] - b[0]), abs(a[1] - b[1])) == 1
 
 
 def point_rect_distance(px: float, py: float,
@@ -94,9 +111,10 @@ def point_rect_distance(px: float, py: float,
 class Unit:
     """A mobile entity owned by a player or by the hazard."""
 
-    def __init__(self, uid: int, utype: UnitType, owner: int, cell: Cell,
+    def __init__(self, uid: int, utype: UnitType, owner: int, cell: Cell, grid: Grid,
                  scale: float = 1.0) -> None:
         self.id = uid
+        self.grid = grid
         self.type = utype
         self.owner = owner
         self.x = cell[0] + 0.5
@@ -112,6 +130,7 @@ class Unit:
         self.scan_timer = 0.0
         self.work_timer = 0.0
         self.last_attacker: int | None = None
+        self.reserved: Cell | None = None
         self._path_key: tuple[Cell, ...] | None = None
 
     @property
@@ -142,11 +161,38 @@ class Unit:
             self.last_attacker = attacker.id
 
     def set_order(self, order: Order) -> None:
-        """Replace the current order and forget the old path."""
+        """Replace the current order, forget the old path and release the reservation."""
+        self.release_reservation()
         self.order = order
         self.path = []
         self._path_key = None
         self.work_timer = 0.0
+
+    def release_reservation(self) -> None:
+        """Give up the reserved stopping cell, if any."""
+        if self.reserved is not None:
+            self.grid.unreserve(self.reserved, self.id)
+            self.reserved = None
+
+    def _reserve(self, cell: Cell) -> bool:
+        """Move our single reservation to ``cell``; False if another unit holds it."""
+        if self.reserved == cell:
+            return True
+        if not self.grid.can_stand(cell, self.id):
+            return False
+        self.release_reservation()
+        self.grid.reserve(cell, self.id)
+        self.reserved = cell
+        return True
+
+    def _claim_destination(self, order: Move | AttackMove) -> None:
+        """Reserve the nearest free cell around the order's target and retarget to it."""
+        order.claimed = True
+        stand = find_stand_cell(self.grid, self.cell, [order.target], self.id, 0, MOVE_MAX_RING)
+        if stand is not None and self._reserve(stand):
+            if stand != order.target:
+                order.target = stand
+                self.path = []
 
     def update(self, game: Game, dt: float) -> None:
         """Advance the current order by ``dt`` seconds."""
@@ -175,6 +221,8 @@ class Unit:
             self.set_order(Attack(enemy.id))
 
     def _move(self, game: Game, dt: float) -> None:
+        if not self.order.claimed:
+            self._claim_destination(self.order)
         self._walk_to(game, self.order.target, dt)
 
     def _walk_to(self, game: Game, target: Cell, dt: float) -> None:
@@ -203,6 +251,7 @@ class Unit:
         if target is None or not target.alive:
             if order.engaged is not None:
                 order.engaged = None
+                order.claimed = False
                 self.path = []
                 self._path_key = None
             self.scan_timer -= dt
@@ -215,19 +264,40 @@ class Unit:
                     self._path_key = None
         if target is not None:
             self._engage(game, target, dt)
-        else:
-            self._walk_to(game, order.target, dt)
+            return
+        if not order.claimed:
+            self._claim_destination(order)
+        self._walk_to(game, order.target, dt)
 
     def _engage(self, game: Game, target: Entity, dt: float) -> None:
-        """Hit the target when in range, otherwise close in on it."""
+        """Hit the target when in range, otherwise go to a reserved cell near it.
+
+        The stand cell is the nearest free cell in the rings around the target
+        (ring 1 is in range; outer rings are waiting places). It is
+        re-chosen at most every ``REPATH_INTERVAL``, when the target has
+        moved or the unit is waiting with no path.
+        """
         if self.distance_to(target) <= self.type.attack_range:
             self.path = []
             self._path_key = None
+            if self.reserved != self.cell:
+                self._reserve(self.cell)
             if self.cooldown <= 0:
                 target.take_damage(self.damage, self)
                 self.cooldown = self.type.attack_cooldown
             return
-        self._approach(game, target.cells(), dt)
+        cells = target.cells()
+        key = tuple(cells)
+        if self.repath_timer <= 0 and (key != self._path_key or not self.path):
+            self.repath_timer = REPATH_INTERVAL
+            self._path_key = key
+            stand = find_stand_cell(self.grid, self.cell, cells, self.id, 1, ATTACK_MAX_RING)
+            if stand is not None and self._reserve(stand):
+                self.path = find_path(self.grid, self.cell, stand) or []
+            else:
+                self.release_reservation()
+                self.path = find_path_adjacent(self.grid, self.cell, cells) or []
+        self._step(game, dt)
 
     def _gather(self, game: Game, dt: float) -> None:
         order = self.order
@@ -244,10 +314,14 @@ class Unit:
                 self.set_order(None)
                 return
         if order.returning:
+            self.release_reservation()
             self._return_load(game, dt)
             return
-        if chebyshev(self.cell, order.resource) <= 1:
-            self.path = []
+        stand = self.reserved
+        if stand is None or not _touches(stand, order.resource):
+            self._find_mining_spot(game)
+            return
+        if self.cell == stand and not self.path:
             self.work_timer += dt
             if self.work_timer >= GATHER_TIME:
                 self.work_timer = 0.0
@@ -255,7 +329,31 @@ class Unit:
                 if self.carrying >= self.type.gather_capacity:
                     order.returning = True
             return
-        self._approach(game, [order.resource], dt)
+        if not self.path:
+            path = find_path(grid, self.cell, stand)
+            if path is None:
+                self.release_reservation()
+                self._switch_resource(game)
+                return
+            self.path = path
+        self._step(game, dt)
+
+    def _find_mining_spot(self, game: Game) -> None:
+        """Check the current resource cell once for a free spot; else switch resource."""
+        order = self.order
+        stand = find_stand_cell(self.grid, self.cell, [order.resource], self.id)
+        if stand is not None and self._reserve(stand):
+            self.path = []
+            self.work_timer = 0.0
+        else:
+            self._switch_resource(game)
+
+    def _switch_resource(self, game: Game) -> None:
+        """Retarget to a random resource cell nearby, to be checked next tick."""
+        alt = game.random_resource_near(self.order.resource, GATHER_SWITCH_RADIUS)
+        if alt is not None:
+            self.order.resource = alt
+            self.path = []
 
     def _return_load(self, game: Game, dt: float) -> None:
         """Walk to the nearest own building and deposit what we carry."""

@@ -1,10 +1,14 @@
-"""Headless simulation tests: gathering, training, hazard waves and combat."""
+"""Headless simulation tests: gathering, training, hazard waves, combat,
+reservations and pushback."""
+
+import math
 
 from rtstest.sim.game import TICK, Game
 from rtstest.sim.players import HAZARD_OWNER, STARTING_RESOURCES
 from rtstest.sim.units import CREEP, SOLDIER, WORKER, Gather, Move
-from rtstest.world.grid import Grid, Terrain
+from rtstest.world.grid import Grid, Terrain, chebyshev
 from rtstest.world.mapgen import MapInfo
+from rtstest.world.pathfinding import ring_cells
 
 
 def _small_game() -> Game:
@@ -137,3 +141,84 @@ def test_full_game_runs():
     game = Game(seed=1)
     _run(game, 120)
     assert game.hazard.wave >= 2
+
+
+def _open_game(width: int = 30, height: int = 30) -> Game:
+    """One player, base around (3, 3), on an open map with no hazard."""
+    game = Game(map_info=MapInfo(Grid(width, height), [(3, 3)]))
+    game.hazard.next_wave_time = 1e9
+    return game
+
+
+def test_two_workers_mine_from_different_cells():
+    game = _small_game()
+    w1, w2 = game.units_of(0)[:2]
+    game.order_gather([w1.id, w2.id], (10, 5))
+    _run(game, 4)
+    assert w1.reserved and w2.reserved and w1.reserved != w2.reserved
+    assert w1.cell == w1.reserved and w2.cell == w2.reserved
+    assert game.grid.reserved_by(w1.reserved) == w1.id
+
+
+def test_worker_switches_resource_when_spots_taken():
+    game = _open_game()
+    game.grid.set_terrain((15, 15), Terrain.RESOURCE)
+    game.grid.set_terrain((17, 15), Terrain.RESOURCE)
+    for c in ring_cells([(15, 15)], 1):
+        game.grid.reserve(c, 999)
+    worker = game.units_of(0)[0]
+    game.order_gather([worker.id], (15, 15))
+    _run(game, 1)
+    assert worker.order.resource == (17, 15)
+    assert worker.reserved is not None and chebyshev(worker.reserved, (17, 15)) == 1
+
+
+def test_reservation_released_on_new_order_and_death():
+    game = _small_game()
+    worker = game.units_of(0)[0]
+    game.order_gather([worker.id], (10, 5))
+    _run(game, 1)
+    spot = worker.reserved
+    assert spot is not None
+    worker.set_order(None)
+    assert game.grid.reserved_by(spot) is None
+    game.order_move([worker.id], (15, 15))
+    _run(game, 0.5)
+    spot = worker.reserved
+    worker.hp = 0
+    game.step()
+    assert game.grid.reserved_by(spot) is None
+
+
+def test_attackers_surround_target_on_distinct_cells():
+    game = _open_game()
+    target = game.spawn_unit(CREEP, HAZARD_OWNER, (20, 20), scale=100)
+    target.damage = 0
+    soldiers = [game.spawn_unit(SOLDIER, 0, (10, 18 + i)) for i in range(4)]
+    game.order_attack([s.id for s in soldiers], target.id)
+    _run(game, 6)
+    cells = [s.cell for s in soldiers]
+    assert len(set(cells)) == 4
+    assert all(s.distance_to(target) <= SOLDIER.attack_range for s in soldiers)
+
+
+def test_pushback_separates_idle_units():
+    game = _open_game()
+    a = game.spawn_unit(SOLDIER, 0, (15, 15))
+    b = game.spawn_unit(SOLDIER, 0, (15, 15))
+    _run(game, 2)
+    assert math.hypot(a.x - b.x, a.y - b.y) >= 0.6
+
+
+def test_moving_unit_passes_through_stopped_group():
+    game = _open_game()
+    group = [game.spawn_unit(SOLDIER, 0, (14 + dx, 14 + dy))
+             for dx in range(3) for dy in range(3)]
+    for s in group:
+        game.order_move([s.id], s.cell)
+    _run(game, 1)
+    runner = game.spawn_unit(WORKER, 0, (10, 15))
+    game.order_move([runner.id], (20, 15))
+    _run(game, 10)
+    assert runner.cell == (20, 15) and runner.order is None
+    assert all(s.cell == s.reserved for s in group)
