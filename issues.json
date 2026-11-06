@@ -32,7 +32,13 @@
   {
     "id": 6,
     "title": "Pushback priority: workers push friendly units away from resources",
-    "status": "open",
+    "status": "done",
     "description": "Add priority to pushback. Workers push friendly units that are standing next to resources out of the way, so idle or parked units do not block mining spots."
+  },
+  {
+    "id": 7,
+    "title": "Harvesting generates hazards: ents from wood, fire pits from crystal",
+    "status": "open",
+    "description": "Collecting resources wakes up the environment. Cutting enough wood turns trees into ents that attack whoever is closest (not necessarily whoever cut). Mining crystal makes fiery pits appear that spawn the red creeps. Not all resources need to be dangerous. Interplayer dynamic: overharvesting pushes danger onto neighbours, which gives players something to negotiate about. Not easy to add yet. Open questions: (1) resource types: at least wood and crystal; separate currencies or one stockpile? (2) disturbance tracked locally per area or globally per resource type? (3) ent wake-up rule: which trees, after how much cutting; does an ent remove its tree? (4) where fire pits appear, whether they can be destroyed; do timed waves stay as background pressure or get replaced? (5) is there a safe but slow resource?"
   }
 ]

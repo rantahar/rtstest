@@ -23,6 +23,7 @@ from rtstest.sim.steering import apply_pushback
 from rtstest.sim.units import WORKER, Attack, AttackMove, Gather, Move, Unit, UnitType
 from rtstest.world.grid import Cell, Terrain
 from rtstest.world.mapgen import MapInfo, generate
+from rtstest.world.pathfinding import ring_cells
 
 TICK = 1 / 20
 STARTING_WORKERS = 3
@@ -158,6 +159,29 @@ class Game:
         if not buildings:
             return None
         return min(buildings, key=lambda b: math.hypot(b.center[0] - x, b.center[1] - y))
+
+    def is_displaceable_by(self, uid: int, miner: Unit) -> bool:
+        """Whether unit ``uid`` must give up its cell to ``miner``: friendly and not gathering."""
+        other = self.units.get(uid)
+        return (other is not None and other is not miner and other.owner == miner.owner
+                and not isinstance(other.order, Gather))
+
+    def displace(self, uid: int) -> None:
+        """Make a unit give up its reserved cell and step to a random free cell nearby.
+
+        Idle and moving units get a new move order there; units with other
+        orders only lose their reservation and pick a new stand cell themselves.
+        """
+        unit = self.units.get(uid)
+        if unit is None:
+            return
+        unit.release_reservation()
+        if unit.order is not None and not isinstance(unit.order, Move):
+            return
+        cells = [c for ring in (1, 2) for c in ring_cells([unit.cell], ring)
+                 if self.grid.can_stand(c, uid)]
+        if cells:
+            unit.set_order(Move(self.rng.choice(cells)))
 
     def random_resource_near(self, cell: Cell, radius: int) -> Cell | None:
         """A random resource cell other than ``cell`` within ``radius`` cells (square scan).

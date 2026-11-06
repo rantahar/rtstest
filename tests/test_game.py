@@ -6,7 +6,7 @@ import math
 from rtstest.sim.game import TICK, Game
 from rtstest.sim.players import HAZARD_OWNER, STARTING_RESOURCES
 from rtstest.sim.units import CREEP, SOLDIER, WORKER, Gather, Move
-from rtstest.world.grid import Grid, Terrain, chebyshev
+from rtstest.world.grid import Cell, Grid, Terrain, chebyshev
 from rtstest.world.mapgen import MapInfo
 from rtstest.world.pathfinding import ring_cells
 
@@ -222,3 +222,43 @@ def test_moving_unit_passes_through_stopped_group():
     _run(game, 10)
     assert runner.cell == (20, 15) and runner.order is None
     assert all(s.cell == s.reserved for s in group)
+
+
+def _walled_resource(game: Game) -> Cell:
+    """Resource at (15, 15) whose only free neighbour is (14, 15); returns that cell."""
+    game.grid.set_terrain((15, 15), Terrain.RESOURCE, amount=500)
+    for c in ring_cells([(15, 15)], 1):
+        if c != (14, 15):
+            game.grid.set_terrain(c, Terrain.ROCK)
+    return (14, 15)
+
+
+def test_miner_displaces_parked_friendly_unit():
+    game = _open_game()
+    spot = _walled_resource(game)
+    soldier = game.spawn_unit(SOLDIER, 0, (10, 15))
+    game.order_move([soldier.id], spot)
+    _run(game, 4)
+    assert soldier.reserved == spot and soldier.cell == spot
+    worker = game.units_of(0)[0]
+    game.order_gather([worker.id], (15, 15))
+    _run(game, 10)
+    assert worker.reserved == spot
+    assert soldier.reserved != spot and soldier.cell != spot
+    assert game.players[0].resources > STARTING_RESOURCES or worker.carrying > 0
+
+
+def test_miner_does_not_displace_other_players_units():
+    grid = Grid(30, 30)
+    game = Game(map_info=MapInfo(grid, [(3, 3), (26, 26)]), human_player=None)
+    game.ais = []
+    game.hazard.next_wave_time = 1e9
+    spot = _walled_resource(game)
+    other = game.spawn_unit(SOLDIER, 1, (10, 15))
+    game.order_move([other.id], spot)
+    _run(game, 4)
+    worker = game.units_of(0)[0]
+    game.order_gather([worker.id], (15, 15))
+    _run(game, 5)
+    assert other.reserved == spot
+    assert worker.reserved != spot

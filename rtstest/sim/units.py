@@ -11,7 +11,8 @@ destination, a mining spot next to a resource, or a cell in range of an
 attack target. A unit holds at most one reservation; it is released when the
 order changes, when a worker leaves to deposit, and when the unit dies
 (``release_reservation``). Workers check at most one resource cell per tick
-for a free mining spot and otherwise switch to a random nearby resource.
+for a free mining spot, taking over a spot held by a friendly non-gathering
+unit if needed, and otherwise switch to a random nearby resource.
 """
 
 from __future__ import annotations
@@ -339,9 +340,17 @@ class Unit:
         self._step(game, dt)
 
     def _find_mining_spot(self, game: Game) -> None:
-        """Check the current resource cell once for a free spot; else switch resource."""
+        """Check the current resource cell once for a free spot; else switch resource.
+
+        When every spot is taken, a spot held by a friendly unit that is not
+        gathering is taken over and that unit is moved aside (``Game.displace``).
+        """
         order = self.order
-        stand = find_stand_cell(self.grid, self.cell, [order.resource], self.id)
+        stand = find_stand_cell(self.grid, self.cell, [order.resource], self.id,
+                                can_displace=lambda uid: game.is_displaceable_by(uid, self))
+        holder = self.grid.reserved_by(stand) if stand is not None else None
+        if holder is not None and holder != self.id:
+            game.displace(holder)
         if stand is not None and self._reserve(stand):
             self.path = []
             self.work_timer = 0.0

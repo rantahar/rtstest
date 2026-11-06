@@ -72,17 +72,23 @@ def ring_cells(targets: Iterable[Cell], ring: int) -> list[Cell]:
 
 
 def find_stand_cell(grid: Grid, start: Cell, targets: Iterable[Cell], uid: int,
-                    min_ring: int = 1, max_ring: int = 1) -> Cell | None:
+                    min_ring: int = 1, max_ring: int = 1,
+                    can_displace: Callable[[int], bool] | None = None) -> Cell | None:
     """A cell where unit ``uid`` may stop near ``targets``, or None.
 
     Searches rings around the targets from ``min_ring`` outwards and returns,
     from the first ring with any candidate, the cell nearest to ``start``
-    that is passable and not reserved by another unit. Only the ring cells
-    are checked, never the unit list.
+    that is passable and not reserved by another unit. If a ring has no free
+    cell, a passable cell whose holder satisfies ``can_displace(holder_id)``
+    counts as a candidate too; the caller must then move the holder away.
+    Only the ring cells are checked, never the unit list.
     """
     targets = list(targets)
     for ring in range(min_ring, max_ring + 1):
-        candidates = [c for c in ring_cells(targets, ring) if grid.can_stand(c, uid)]
+        cells = [c for c in ring_cells(targets, ring) if grid.is_passable(c)]
+        candidates = [c for c in cells if grid.can_stand(c, uid)]
+        if not candidates and can_displace is not None:
+            candidates = [c for c in cells if can_displace(grid.reserved_by(c))]
         if candidates:
             return min(candidates, key=lambda c: octile(c, start))
     return None
