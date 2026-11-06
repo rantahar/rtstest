@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rtstest"
+version = "0.1.0"
+description = "Cohabitive RTS prototype: survive a growing environmental hazard alongside other players."
+requires-python = ">=3.12"
+dependencies = ["pygame-ce>=2.5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+rtstest = "rtstest.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rtstest*"]
+
+[tool.setuptools.package-data]
+rtstest = ["assets/sprites/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

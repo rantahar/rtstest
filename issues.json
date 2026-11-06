@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "title": "Resource donation interface",
+    "status": "open",
+    "description": "No direct sharing mechanics (no shared stockpiles or shared victory). Instead a simple interface to donate resources to another player. Players handle negotiations themselves."
+  },
+  {
+    "id": 2,
+    "title": "Per-player stance: shoot on sight / leave alone",
+    "status": "open",
+    "description": "Interface to designate each other player as shoot on sight or leave alone, like alliances in Red Alert but with no shared victory condition. Hostility is already decided in one place, Game.is_hostile."
+  },
+  {
+    "id": 3,
+    "title": "Rule-based AI diplomacy",
+    "status": "open",
+    "description": "Without multiplayer, cohabitive play rests on the AI players. They need rules for donating, setting stances, and reacting to other players' donations, stances and attacks."
+  },
+  {
+    "id": 4,
+    "title": "Emoji / gesture communication, no text chat",
+    "status": "open",
+    "description": "Players communicate only through emoji or gestures. No text chat: it causes more problems than it is worth. The AI players should send and react to these signals too."
+  },
+  {
+    "id": 5,
+    "title": "Networking and multiplayer state",
+    "status": "open",
+    "description": "Networked multiplayer. New territory for the user, so interesting to explore. The simulation already runs in fixed ticks and every action goes through Game command methods, a starting point for lockstep (send commands, not state)."
+  }
+]

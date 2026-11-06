@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Placeholder resource tile: a cluster of crystals. Not tinted. -->
+  <path d="M14 58 L20 24 L28 58 Z" fill="#5fd0e0" stroke="#104050" stroke-width="2"/>
+  <path d="M26 58 L34 6 L44 58 Z" fill="#8ae8f4" stroke="#104050" stroke-width="2"/>
+  <path d="M40 58 L48 30 L54 58 Z" fill="#4ab8cc" stroke="#104050" stroke-width="2"/>
+</svg>

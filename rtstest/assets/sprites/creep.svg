@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Placeholder hazard creature: spiky red blob. Not tinted. -->
+  <path d="M32 2 L39 18 L56 10 L48 27 L62 34 L46 40 L52 58 L35 47 L28 62 L24 45 L6 52 L16 36 L2 26 L19 21 L14 5 L28 16 Z"
+        fill="#c02828" stroke="#300000" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="26" cy="30" r="4" fill="#ffe040"/>
+  <circle cx="38" cy="30" r="4" fill="#ffe040"/>
+</svg>

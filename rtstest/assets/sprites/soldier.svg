@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Placeholder soldier: sword and a shield. White parts take the owner's colour. -->
+  <path d="M46 6 L46 46" stroke="#b0b0b0" stroke-width="5" stroke-linecap="round"/>
+  <path d="M38 40 L54 40" stroke="#404040" stroke-width="5" stroke-linecap="round"/>
+  <path d="M8 10 L40 10 L40 34 Q40 52 24 60 Q8 52 8 34 Z" fill="#ffffff" stroke="#202020" stroke-width="3"/>
+  <path d="M24 16 L24 50 M14 28 L34 28" stroke="#606060" stroke-width="4"/>
+</svg>
