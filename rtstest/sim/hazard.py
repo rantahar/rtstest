@@ -13,10 +13,12 @@ from typing import TYPE_CHECKING
 
 from rtstest.sim.players import HAZARD_OWNER
 from rtstest.sim.units import CREEP, Unit
-from rtstest.world.grid import Cell, Grid
+from rtstest.world import Cell, Grid
 
 if TYPE_CHECKING:
     from rtstest.sim.game import Game
+
+__all__ = ["Hazard"]
 
 FIRST_WAVE_TIME = 45.0
 BASE_INTERVAL = 45.0

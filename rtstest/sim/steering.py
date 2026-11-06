@@ -18,10 +18,12 @@ import math
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from rtstest.world.grid import Cell, Grid
+from rtstest.world import Cell, Grid
 
 if TYPE_CHECKING:
     from rtstest.sim.units import Unit
+
+__all__ = ["apply_pushback"]
 
 PUSH_RADIUS = 0.7
 PUSH_SPEED = 2.0
@@ -29,7 +31,7 @@ MOVING_PAIR_FACTOR = 0.3
 GOLDEN_ANGLE = 2.399963
 
 
-def is_anchored(unit: Unit) -> bool:
+def _is_anchored(unit: Unit) -> bool:
     """Whether the unit stands still on its own reserved cell."""
     return not unit.path and unit.reserved == unit.cell
 
@@ -41,7 +43,7 @@ def apply_pushback(units: list[Unit], grid: Grid, dt: float) -> None:
         buckets[u.cell].append(u)
     pushes = []
     for u in units:
-        if is_anchored(u):
+        if _is_anchored(u):
             continue
         push = _push_on(u, buckets)
         if push is not None:

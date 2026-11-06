@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from rtstest.world.grid import Cell, Grid, Terrain, chebyshev
 
+__all__ = ["MapInfo", "generate"]
+
 START_CLEAR_RADIUS = 5
 START_RING_FRACTION = 0.33
 HOME_PATCH_DISTANCE = 7

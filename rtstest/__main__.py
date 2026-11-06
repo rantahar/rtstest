@@ -8,10 +8,10 @@ import argparse
 
 import pygame
 
-from rtstest.sim.game import TICK, Game
-from rtstest.ui.input import InputController
-from rtstest.ui.panel import PANEL_HEIGHT
-from rtstest.ui.render import HUD_HEIGHT, Camera, Renderer
+from rtstest.sim import TICK, Game
+from rtstest.ui import HUD_HEIGHT, PANEL_HEIGHT, Camera, InputController, Renderer
+
+__all__ = ["main"]
 
 WINDOW_SIZE = (1280, 800)
 FPS = 60

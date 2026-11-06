@@ -12,12 +12,12 @@ import math
 
 import pygame
 
-from rtstest.sim.buildings import Building, BuildingType
-from rtstest.sim.game import Game
-from rtstest.sim.units import SOLDIER, WORKER, UnitType
+from rtstest.sim import SOLDIER, WORKER, Building, BuildingType, Game, UnitType
 from rtstest.ui.panel import Button, Panel, panel_rect, selected_building, selected_units
 from rtstest.ui.render import Camera
-from rtstest.world.grid import Terrain
+from rtstest.world import Terrain
+
+__all__ = ["InputController"]
 
 EDGE_SCROLL_MARGIN = 6
 SCROLL_SPEED = 900

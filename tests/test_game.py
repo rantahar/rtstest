@@ -3,13 +3,9 @@ reservations and pushback."""
 
 import math
 
-from rtstest.sim.game import TICK, Game
-from rtstest.sim.players import HAZARD_OWNER, STARTING_RESOURCES
-from rtstest.sim.buildings import BARRACKS, BASE
-from rtstest.sim.units import CREEP, SOLDIER, WORKER, Build, Gather, Move
-from rtstest.world.grid import Cell, Grid, Terrain, chebyshev
-from rtstest.world.mapgen import MapInfo
-from rtstest.world.pathfinding import ring_cells
+from rtstest.sim import (BARRACKS, BASE, CREEP, HAZARD_OWNER, SOLDIER, STARTING_RESOURCES, TICK,
+                         WORKER, Build, Game, Gather, Move)
+from rtstest.world import Cell, Grid, MapInfo, Terrain, chebyshev, ring_cells
 
 
 def _small_game() -> Game:

@@ -1,7 +1,6 @@
 """Tests for the tile grid and map generation."""
 
-from rtstest.world.grid import Grid, Terrain, chebyshev
-from rtstest.world.mapgen import generate
+from rtstest.world import Grid, Terrain, chebyshev, generate
 
 
 def test_take_resource_depletes_to_grass():

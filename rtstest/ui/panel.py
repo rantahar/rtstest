@@ -14,10 +14,12 @@ from dataclasses import dataclass
 
 import pygame
 
-from rtstest.sim.buildings import BUILDABLE, MAX_QUEUE, Building, BuildingType
-from rtstest.sim.game import Game
-from rtstest.sim.units import SOLDIER, WORKER, Unit, UnitType
+from rtstest.sim import (BUILDABLE, MAX_QUEUE, SOLDIER, WORKER, Building, BuildingType, Game, Unit,
+                         UnitType)
 from rtstest.ui.assets import SpriteCache
+
+__all__ = ["Panel", "Button", "PANEL_HEIGHT", "panel_rect", "selected_units",
+           "selected_building"]
 
 PANEL_HEIGHT = 160
 INFO_WIDTH = 300
@@ -236,10 +238,9 @@ class Panel:
             screen.blit(icon, icon.get_rect(center=rect.center))
         if building.queue:
             front = rects[0]
-            if building.paid:
-                frac = min(1.0, building.progress / building.queue[0].train_time)
+            if not building.waiting_for_resources:
                 screen.fill(PROGRESS_COLOR, (front.left, front.bottom + 3,
-                                             round(front.width * frac), 4))
+                                             round(front.width * building.training_fraction), 4))
             else:
                 self._text(screen, "Waiting for resources", (front.left, front.bottom + 3),
                            WARN_TEXT, self.small)

@@ -17,11 +17,12 @@ from typing import TYPE_CHECKING
 from rtstest.sim.buildings import BARRACKS, BASE, Building
 from rtstest.sim.players import HAZARD_OWNER
 from rtstest.sim.units import SOLDIER, WORKER, Attack, Build, Unit
-from rtstest.world.grid import Cell
-from rtstest.world.pathfinding import ring_cells
+from rtstest.world import Cell, ring_cells
 
 if TYPE_CHECKING:
     from rtstest.sim.game import Game
+
+__all__ = ["ScriptedAI"]
 
 THINK_INTERVAL = 1.0
 WORKER_TARGET = 6

@@ -14,28 +14,44 @@ import math
 import random
 from collections import deque
 from collections.abc import Iterable, Iterator
-from typing import Union
 
 from rtstest.sim.ai import ScriptedAI
 from rtstest.sim.buildings import BASE, Building, BuildingType
+from rtstest.sim.entities import Entity
 from rtstest.sim.hazard import Hazard
 from rtstest.sim.players import HAZARD_OWNER, make_players
 from rtstest.sim.steering import apply_pushback
 from rtstest.sim.units import WORKER, Attack, AttackMove, Build, Gather, Move, Unit, UnitType
-from rtstest.world.grid import Cell, Terrain
-from rtstest.world.mapgen import MapInfo, generate
-from rtstest.world.pathfinding import ring_cells
+from rtstest.world import Cell, MapInfo, Terrain, generate, ring_cells
+
+__all__ = ["Game", "TICK"]
 
 TICK = 1 / 20
 STARTING_WORKERS = 3
 FREE_CELL_SEARCH_LIMIT = 400
 RETALIATE_RANGE_FACTOR = 2.0
 
-Entity = Union[Unit, Building]
 
 
 class Game:
-    """The complete simulation state."""
+    """The complete simulation state.
+
+    Public attributes (read-only outside ``sim``): ``grid``, ``players``
+    (list indexed by player id), ``units`` and ``buildings`` (dicts by id),
+    ``time`` (seconds), ``hazard`` (its ``next_wave_time`` may be set, e.g.
+    by tests). Properties: ``wave``, ``next_wave_in``.
+
+    For UI and computer players: ``step``, the lookups (``entity``,
+    ``entity_at``, ``entities``, ``units_of``, ``buildings_of``,
+    ``units_in_rect``, ``nearest_resource``, ``can_place``) and the commands
+    (``order_*``, ``train``, ``cancel_training``, ``set_rally``).
+
+    Package-internal services for units and buildings: ``spawn_unit``,
+    ``place_building``, ``nearest_hostile``, ``nearest_base``,
+    ``random_resource_near``, ``free_cell_near``, ``free_cells_around``,
+    ``displace``, ``is_displaceable_by``, ``start_construction``,
+    ``is_building``, ``footprint``, ``is_hostile``, ``ais``.
+    """
 
     def __init__(self, width: int = 64, height: int = 64, n_players: int = 3,
                  seed: int = 0, human_player: int | None = 0,
@@ -52,7 +68,7 @@ class Game:
         self.units: dict[int, Unit] = {}
         self.buildings: dict[int, Building] = {}
         self.hazard = Hazard(seed)
-        self.rng = random.Random(seed + 2)
+        self._rng = random.Random(seed + 2)
         self.time = 0.0
         self._next_id = 1
         self.ais = [ScriptedAI(p.id) for p in self.players if p.is_ai]
@@ -64,6 +80,16 @@ class Game:
                 cell = self.free_cell_near(base.cells())
                 if cell is not None:
                     self.spawn_unit(WORKER, player.id, cell)
+
+    @property
+    def wave(self) -> int:
+        """Number of hazard waves spawned so far."""
+        return self.hazard.wave
+
+    @property
+    def next_wave_in(self) -> float:
+        """Seconds until the next hazard wave (0 if due)."""
+        return max(0.0, self.hazard.next_wave_time - self.time)
 
     # --- creation and lookup -------------------------------------------
 
@@ -237,7 +263,7 @@ class Game:
         cells = [c for ring in (1, 2) for c in ring_cells([unit.cell], ring)
                  if self.grid.can_stand(c, uid)]
         if cells:
-            unit.set_order(Move(self.rng.choice(cells)))
+            unit.set_order(Move(self._rng.choice(cells)))
 
     def random_resource_near(self, cell: Cell, radius: int) -> Cell | None:
         """A random resource cell other than ``cell`` within ``radius`` cells (square scan).
@@ -250,7 +276,7 @@ class Game:
                  if (x, y) != cell and self.grid.in_bounds((x, y))
                  and self.grid.terrain_at((x, y)) == Terrain.RESOURCE]
         if found:
-            return self.rng.choice(found)
+            return self._rng.choice(found)
         return self.nearest_resource(cell, math.inf)
 
     def nearest_resource(self, cell: Cell, radius: float) -> Cell | None:

@@ -21,10 +21,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rtstest.sim.units import SOLDIER, WORKER, UnitType
-from rtstest.world.grid import Cell
+from rtstest.world import Cell
 
 if TYPE_CHECKING:
-    from rtstest.sim.game import Entity, Game
+    from rtstest.sim.entities import Entity
+    from rtstest.sim.game import Game
+
+__all__ = ["BuildingType", "BASE", "BARRACKS", "BUILDABLE", "MAX_QUEUE", "Building"]
 
 MAX_QUEUE = 5
 START_HP_FRACTION = 0.1
@@ -50,7 +53,17 @@ BUILDABLE = (BARRACKS,)
 
 
 class Building:
-    """A static entity on the grid, owned by a player."""
+    """A static entity on the grid, owned by a player; implements ``Entity``.
+
+    Public attributes (read-only outside ``sim``): ``id``, ``type``,
+    ``owner``, ``cell`` (top-left), ``hp``, ``max_hp``, ``complete``,
+    ``queue`` (unit types waiting, front first), ``rally`` (cell or None).
+    Properties: ``alive``, ``center``, ``build_fraction``,
+    ``training_fraction``, ``waiting_for_resources``.
+
+    Package-internal: ``builder`` (id of the worker constructing it),
+    ``construct``, ``can_enqueue``, ``cancel``, ``update``.
+    """
 
     def __init__(self, bid: int, btype: BuildingType, owner: int, cell: Cell,
                  complete: bool = True) -> None:
@@ -64,8 +77,8 @@ class Building:
         self.builder: int | None = None
         self.hp = float(btype.max_hp) if complete else btype.max_hp * START_HP_FRACTION
         self.queue: list[UnitType] = []
-        self.progress = 0.0
-        self.paid = False
+        self._progress = 0.0
+        self._paid = False
         self.rally: Cell | None = None
 
     @property
@@ -92,6 +105,18 @@ class Building:
     def take_damage(self, amount: float, attacker: Entity | None = None) -> None:
         """Lose hp; buildings do not fight back."""
         self.hp -= amount
+
+    @property
+    def training_fraction(self) -> float:
+        """Progress of the front unit's training from 0 to 1 (0 when idle or unpaid)."""
+        if not self.queue or not self._paid:
+            return 0.0
+        return min(1.0, self._progress / self.queue[0].train_time)
+
+    @property
+    def waiting_for_resources(self) -> bool:
+        """Whether the front unit is queued but not yet paid for."""
+        return bool(self.queue) and self.complete and not self._paid
 
     @property
     def build_fraction(self) -> float:
@@ -125,20 +150,20 @@ class Building:
         if not self.complete or not self.queue:
             return
         front = self.queue[0]
-        if not self.paid:
+        if not self._paid:
             player = game.players[self.owner]
             if player.resources < front.cost:
                 return
             player.resources -= front.cost
-            self.paid = True
-        self.progress += dt
-        if self.progress < front.train_time:
+            self._paid = True
+        self._progress += dt
+        if self._progress < front.train_time:
             return
         cell = game.free_cell_near(self.cells())
         if cell is not None:
             unit = game.spawn_unit(self.queue.pop(0), self.owner, cell)
-            self.progress = 0.0
-            self.paid = False
+            self._progress = 0.0
+            self._paid = False
             if self.rally is not None:
                 game.order_gather([unit.id], self.rally)
 
@@ -149,7 +174,7 @@ class Building:
         utype = self.queue.pop(index)
         if index != 0:
             return 0
-        refund = utype.cost if self.paid else 0
-        self.paid = False
-        self.progress = 0.0
+        refund = utype.cost if self._paid else 0
+        self._paid = False
+        self._progress = 0.0
         return refund

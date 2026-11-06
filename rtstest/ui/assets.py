@@ -10,6 +10,8 @@ from importlib import resources
 
 import pygame
 
+__all__ = ["SpriteCache"]
+
 SPRITE_DIR = resources.files("rtstest") / "assets" / "sprites"
 MISSING_COLOR = (255, 0, 255)
 

@@ -1,7 +1,7 @@
 """Tests for A* pathfinding."""
 
-from rtstest.world.grid import Grid, Terrain, chebyshev
-from rtstest.world.pathfinding import find_path, find_path_adjacent, find_stand_cell, ring_cells
+from rtstest.world import (Grid, Terrain, chebyshev, find_path, find_path_adjacent,
+                           find_stand_cell, ring_cells)
 
 
 def _wall(height_gap: bool) -> Grid:

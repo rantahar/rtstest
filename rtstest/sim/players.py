@@ -6,6 +6,8 @@ not a player; its units are owned by ``HAZARD_OWNER``.
 
 from dataclasses import dataclass
 
+__all__ = ["Player", "make_players", "HAZARD_OWNER", "STARTING_RESOURCES"]
+
 HAZARD_OWNER = -1
 STARTING_RESOURCES = 150
 PLAYER_COLORS = [(70, 130, 240), (240, 200, 60), (80, 200, 100),

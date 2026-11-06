@@ -2,12 +2,12 @@
 
 import pygame
 
-from rtstest.sim.game import Game
-from rtstest.sim.players import HAZARD_OWNER
-from rtstest.sim.buildings import BuildingType
+from rtstest.sim import HAZARD_OWNER, BuildingType, Game
 from rtstest.ui.assets import SpriteCache
 from rtstest.ui.panel import Panel
-from rtstest.world.grid import Cell, Grid, Terrain
+from rtstest.world import Cell, Grid, Terrain
+
+__all__ = ["Camera", "Renderer", "HUD_HEIGHT"]
 
 DEFAULT_TILE = 32
 MIN_TILE = 16
@@ -159,7 +159,7 @@ class Renderer:
                     pygame.draw.circle(self.screen, SELECT_COLOR, (rx, ry), 5, 2)
             self._hp_bar(rect.left, rect.top - 6, rect.width, b.hp / b.max_hp)
             if b.queue:
-                frac = min(1.0, b.progress / b.queue[0].train_time)
+                frac = b.training_fraction
                 pygame.draw.rect(self.screen, CARRY_COLOR,
                                  (rect.left, rect.bottom + 2, round(rect.width * frac), 3))
 
@@ -197,9 +197,9 @@ class Renderer:
         sw, sh = self.screen.get_size()
         player = game.players[player_id]
         minutes, seconds = divmod(int(game.time), 60)
-        next_wave = max(0, int(game.hazard.next_wave_time - game.time))
+        next_wave = int(game.next_wave_in)
         top = (f"Resources {player.resources}   Time {minutes:02d}:{seconds:02d}   "
-               f"Wave {game.hazard.wave}   next in {next_wave}s   Selected {len(selection)}")
+               f"Wave {game.wave}   next in {next_wave}s   Selected {len(selection)}")
         self.screen.fill(HUD_BG, (0, 0, sw, HUD_HEIGHT))
         self.screen.blit(self.font.render(top, True, TEXT_COLOR), (8, 5))
         x = sw - 8

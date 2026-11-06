@@ -13,6 +13,8 @@ Cell = tuple[int, int]
 
 DEFAULT_RESOURCE_AMOUNT = 150
 DIAGONAL_COST = 2 ** 0.5
+__all__ = ["Cell", "Terrain", "Grid", "chebyshev", "DIAGONAL_COST"]
+
 _ORTHOGONAL = ((1, 0), (-1, 0), (0, 1), (0, -1))
 _DIAGONAL = ((1, 1), (1, -1), (-1, 1), (-1, -1))
 
