@@ -4,12 +4,13 @@ Modules:
 
 - ``game``: ``Game`` holds the whole state, advances it with ``step()``,
   answers world queries and exposes the command interface (``order_move``,
-  ``order_gather``, ``order_attack``, ``set_rally``, ``train``) used by UI
-  and AI alike.
+  ``order_gather``, ``order_attack``, ``order_attack_move``, ``set_rally``,
+  ``train``, ``cancel_training``) used by UI and AI alike.
 - ``units``: ``UnitType`` stats (``WORKER``, ``SOLDIER``, ``CREEP``),
-  orders (``Move``, ``Gather``, ``Attack``) and ``Unit`` behaviour.
+  orders (``Move``, ``Gather``, ``Attack``, ``AttackMove``) and ``Unit``
+  behaviour.
 - ``buildings``: ``BuildingType`` (``BASE``) and ``Building`` with a
-  training queue and rally point.
+  5-slot training queue (paid when training starts) and rally point.
 - ``players``: ``Player`` (resources, colour) and ``HAZARD_OWNER``.
 - ``hazard``: ``Hazard``, the growing waves of hostile creatures.
 - ``ai``: ``ScriptedAI``, rule-based computer players.

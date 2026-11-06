@@ -2,7 +2,7 @@
 
 A unit stands at a float position in cell units (the centre of cell
 ``(x, y)`` is ``(x + 0.5, y + 0.5)``). Each tick ``Unit.update`` advances its
-current order: ``Move``, ``Gather`` or ``Attack``. Idle combat units attack
+current order: ``Move``, ``Gather``, ``Attack`` or ``AttackMove``. Idle combat units attack
 hostiles in sight (as decided by ``Game.nearest_hostile``); workers only
 act on orders.
 """
@@ -73,7 +73,15 @@ class Attack:
     target_id: int
 
 
-Order = Union[Move, Gather, Attack, None]
+@dataclass
+class AttackMove:
+    """Walk to a cell, fighting any hostile met on the way, then carry on."""
+
+    target: Cell
+    engaged: int | None = None
+
+
+Order = Union[Move, Gather, Attack, AttackMove, None]
 
 
 def point_rect_distance(px: float, py: float,
@@ -151,6 +159,8 @@ class Unit:
             self._move(game, dt)
         elif isinstance(order, Gather):
             self._gather(game, dt)
+        elif isinstance(order, AttackMove):
+            self._attack_move(game, dt)
         else:
             self._attack(game, dt)
 
@@ -165,7 +175,10 @@ class Unit:
             self.set_order(Attack(enemy.id))
 
     def _move(self, game: Game, dt: float) -> None:
-        target = self.order.target
+        self._walk_to(game, self.order.target, dt)
+
+    def _walk_to(self, game: Game, target: Cell, dt: float) -> None:
+        """Walk to a cell; the order ends on arrival or when it is unreachable."""
         if not self.path:
             if self.cell == target:
                 self.order = None
@@ -182,6 +195,31 @@ class Unit:
         if target is None or not target.alive:
             self.set_order(None)
             return
+        self._engage(game, target, dt)
+
+    def _attack_move(self, game: Game, dt: float) -> None:
+        order = self.order
+        target = game.entity(order.engaged) if order.engaged is not None else None
+        if target is None or not target.alive:
+            if order.engaged is not None:
+                order.engaged = None
+                self.path = []
+                self._path_key = None
+            self.scan_timer -= dt
+            if self.scan_timer <= 0:
+                self.scan_timer = SCAN_INTERVAL
+                target = game.nearest_hostile(self)
+                if target is not None:
+                    order.engaged = target.id
+                    self.path = []
+                    self._path_key = None
+        if target is not None:
+            self._engage(game, target, dt)
+        else:
+            self._walk_to(game, order.target, dt)
+
+    def _engage(self, game: Game, target: Entity, dt: float) -> None:
+        """Hit the target when in range, otherwise close in on it."""
         if self.distance_to(target) <= self.type.attack_range:
             self.path = []
             self._path_key = None

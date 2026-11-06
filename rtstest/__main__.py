@@ -10,7 +10,8 @@ import pygame
 
 from rtstest.sim.game import TICK, Game
 from rtstest.ui.input import InputController
-from rtstest.ui.render import Camera, Renderer
+from rtstest.ui.panel import PANEL_HEIGHT
+from rtstest.ui.render import HUD_HEIGHT, Camera, Renderer
 
 WINDOW_SIZE = (1280, 800)
 FPS = 60
@@ -34,11 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     clock = pygame.time.Clock()
 
     game = Game(args.size, args.size, args.players, args.seed, HUMAN_PLAYER)
-    camera = Camera(screen.get_size())
+    camera = Camera(screen.get_size(), insets=(HUD_HEIGHT, PANEL_HEIGHT))
     home = game.buildings_of(HUMAN_PLAYER)[0]
     camera.center_on(*home.center)
     renderer = Renderer(screen)
-    controller = InputController(game, camera, HUMAN_PLAYER)
+    controller = InputController(game, camera, renderer.panel, HUMAN_PLAYER)
 
     accumulator = 0.0
     frames = 0
@@ -46,9 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     while running:
         dt = min(clock.tick(FPS) / 1000, MAX_FRAME_TIME)
         for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN
-                                             and event.key == pygame.K_ESCAPE):
+            if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                running = controller.cancel_targeting()
             elif event.type == pygame.VIDEORESIZE:
                 camera.resize(event.size)
             else:
@@ -58,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         while accumulator >= TICK:
             game.step()
             accumulator -= TICK
-        renderer.draw(game, camera, HUMAN_PLAYER, controller.selection, controller.drag_rect())
+        renderer.draw(game, camera, HUMAN_PLAYER, controller.selection, controller.drag_rect(),
+                      controller.targeting)
         pygame.display.flip()
         frames += 1
         if args.frames and frames >= args.frames:

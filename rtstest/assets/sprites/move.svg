@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Placeholder Move command icon: a green arrow. Not tinted. -->
+  <path d="M8 26 L36 26 L36 12 L58 32 L36 52 L36 38 L8 38 Z"
+        fill="#60d070" stroke="#103010" stroke-width="3" stroke-linejoin="round"/>
+</svg>

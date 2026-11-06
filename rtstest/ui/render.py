@@ -1,11 +1,11 @@
-"""Pygame rendering: the camera, map tiles, buildings, units and the HUD."""
+"""Pygame rendering: the camera, map tiles, buildings, units, top HUD and lower panel."""
 
 import pygame
 
 from rtstest.sim.game import Game
 from rtstest.sim.players import HAZARD_OWNER
-from rtstest.sim.units import SOLDIER, WORKER
 from rtstest.ui.assets import SpriteCache
+from rtstest.ui.panel import Panel
 from rtstest.world.grid import Grid, Terrain
 
 DEFAULT_TILE = 32
@@ -27,17 +27,20 @@ CARRY_COLOR = (120, 230, 240)
 HUD_BG = (20, 20, 28)
 TEXT_COLOR = (230, 230, 230)
 OVERLAY_COLOR = (0, 0, 0, 160)
-HELP_TEXT = ("LMB select / drag   RMB move, gather, attack, rally   "
-             f"Q worker ({WORKER.cost})   E soldier ({SOLDIER.cost})   "
-             "arrows/edge scroll   wheel zoom   Esc quit")
 
 
 class Camera:
-    """Integer-pixel view onto the world; world coordinates are in cells."""
+    """Integer-pixel view onto the world; world coordinates are in cells.
 
-    def __init__(self, view_size: tuple[int, int], tile: int = DEFAULT_TILE) -> None:
+    ``insets`` are the (top, bottom) pixel heights covered by HUD and panel;
+    clamping keeps every map row scrollable into the uncovered area.
+    """
+
+    def __init__(self, view_size: tuple[int, int], tile: int = DEFAULT_TILE,
+                 insets: tuple[int, int] = (0, 0)) -> None:
         self.view_w, self.view_h = view_size
         self.tile = tile
+        self.insets = insets
         self.ox = 0
         self.oy = 0
 
@@ -69,8 +72,8 @@ class Camera:
     def clamp(self, world_w: int, world_h: int) -> None:
         """Keep the view near the map: at most a small margin past each edge."""
         margin = EDGE_MARGIN_TILES * self.tile
-        self.ox = _clamp_axis(self.ox, world_w * self.tile, self.view_w, margin)
-        self.oy = _clamp_axis(self.oy, world_h * self.tile, self.view_h, margin)
+        self.ox = _clamp_axis(self.ox, world_w * self.tile, self.view_w, margin, (0, 0))
+        self.oy = _clamp_axis(self.oy, world_h * self.tile, self.view_h, margin, self.insets)
 
     def visible_cells(self, grid: Grid) -> tuple[int, int, int, int]:
         """Cell range ``(x0, y0, x1, y1)``, end-exclusive, that is on screen."""
@@ -81,10 +84,13 @@ class Camera:
         return x0, y0, x1, y1
 
 
-def _clamp_axis(offset: int, world_px: int, view_px: int, margin: int) -> int:
-    if world_px + 2 * margin <= view_px:
-        return (world_px - view_px) // 2
-    return max(-margin, min(world_px - view_px + margin, offset))
+def _clamp_axis(offset: int, world_px: int, view_px: int, margin: int,
+                insets: tuple[int, int]) -> int:
+    lo, hi = insets
+    visible = view_px - lo - hi
+    if world_px + 2 * margin <= visible:
+        return (world_px - visible) // 2 - lo
+    return max(-margin - lo, min(world_px - view_px + hi + margin, offset))
 
 
 class Renderer:
@@ -94,16 +100,19 @@ class Renderer:
         self.screen = screen
         self.sprites = SpriteCache()
         self.font = pygame.font.Font(None, FONT_SIZE)
+        self.panel = Panel(self.sprites, self.font)
 
     def draw(self, game: Game, camera: Camera, player_id: int,
-             selection: set[int], drag_rect: pygame.Rect | None) -> None:
-        """Draw the map, entities, selection box and HUD."""
+             selection: set[int], drag_rect: pygame.Rect | None,
+             targeting: str | None = None) -> None:
+        """Draw the map, entities, selection box, HUD and lower panel."""
         self.screen.fill(BACKGROUND)
         self._draw_tiles(game, camera)
         self._draw_buildings(game, camera, selection)
         self._draw_units(game, camera, selection)
         if drag_rect is not None:
             pygame.draw.rect(self.screen, SELECT_COLOR, drag_rect, 1)
+        self.panel.draw(self.screen, game, player_id, selection, targeting)
         self._draw_hud(game, player_id, selection)
 
     def _draw_tiles(self, game: Game, camera: Camera) -> None:
@@ -171,8 +180,6 @@ class Renderer:
             label = self.font.render(p.name if p.alive else f"{p.name} †", True, p.color)
             x -= label.get_width() + 12
             self.screen.blit(label, (x, 5))
-        self.screen.fill(HUD_BG, (0, sh - HUD_HEIGHT, sw, HUD_HEIGHT))
-        self.screen.blit(self.font.render(HELP_TEXT, True, TEXT_COLOR), (8, sh - HUD_HEIGHT + 5))
         if not player.alive:
             overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
             overlay.fill(OVERLAY_COLOR)

@@ -2,8 +2,8 @@
 
 ``Game.step`` advances everything by ``TICK`` seconds. Units, buildings, the
 hazard and the AI query the world through this object, and the ``order_*``,
-``set_rally`` and ``train`` methods are the command interface shared by the
-UI and computer players. Hostility between owners is decided in one place,
+``set_rally``, ``train`` and ``cancel_training`` methods are the command
+interface shared by the UI and computer players. Hostility between owners is decided in one place,
 ``is_hostile``.
 """
 
@@ -18,7 +18,7 @@ from rtstest.sim.ai import ScriptedAI
 from rtstest.sim.buildings import BASE, Building, BuildingType
 from rtstest.sim.hazard import Hazard
 from rtstest.sim.players import HAZARD_OWNER, make_players
-from rtstest.sim.units import WORKER, Attack, Gather, Move, Unit, UnitType
+from rtstest.sim.units import WORKER, Attack, AttackMove, Gather, Move, Unit, UnitType
 from rtstest.world.grid import Cell, Terrain
 from rtstest.world.mapgen import MapInfo, generate
 
@@ -233,6 +233,15 @@ class Game:
             if u.owner != target.owner:
                 u.set_order(Attack(target_id))
 
+    def order_attack_move(self, unit_ids: Iterable[int], cell: Cell) -> None:
+        """Units walk to a cell, fighting hostiles they meet on the way."""
+        units = self._units(unit_ids)
+        targets = self.free_cells_around(cell, len(units))
+        if not targets:
+            return
+        for i, u in enumerate(units):
+            u.set_order(AttackMove(targets[i % len(targets)]))
+
     def set_rally(self, building_id: int, cell: Cell | None) -> None:
         """Set (or clear with None) where a building sends the units it trains."""
         b = self.buildings.get(building_id)
@@ -240,16 +249,18 @@ class Game:
             b.rally = cell
 
     def train(self, building_id: int, utype: UnitType) -> bool:
-        """Pay for and queue a unit; False if not allowed or not affordable."""
+        """Queue a unit (paid when its training starts); False if not allowed or queue full."""
         b = self.buildings.get(building_id)
         if b is None or not b.can_enqueue(utype):
             return False
-        player = self.players[b.owner]
-        if player.resources < utype.cost:
-            return False
-        player.resources -= utype.cost
         b.queue.append(utype)
         return True
+
+    def cancel_training(self, building_id: int, index: int) -> None:
+        """Remove a queued unit, refunding it if its training was already paid."""
+        b = self.buildings.get(building_id)
+        if b is not None:
+            self.players[b.owner].resources += b.cancel(index)
 
     # --- update ----------------------------------------------------------
 

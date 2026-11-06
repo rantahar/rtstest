@@ -2,7 +2,7 @@
 
 from rtstest.sim.game import TICK, Game
 from rtstest.sim.players import HAZARD_OWNER, STARTING_RESOURCES
-from rtstest.sim.units import CREEP, SOLDIER, WORKER
+from rtstest.sim.units import CREEP, SOLDIER, WORKER, Gather, Move
 from rtstest.world.grid import Grid, Terrain
 from rtstest.world.mapgen import MapInfo
 
@@ -29,20 +29,81 @@ def test_worker_gathers_and_deposits():
     assert game.players[0].resources > STARTING_RESOURCES
 
 
-def test_train_pays_and_spawns():
+def test_train_pays_on_start_and_spawns():
     game = _small_game()
     base = game.buildings_of(0)[0]
     before = len(game.units_of(0))
     assert game.train(base.id, WORKER)
+    assert game.players[0].resources == STARTING_RESOURCES
+    game.step()
     assert game.players[0].resources == STARTING_RESOURCES - WORKER.cost
     _run(game, WORKER.train_time + 1)
     assert len(game.units_of(0)) == before + 1
 
 
-def test_train_refused_without_resources():
+def test_only_front_of_queue_is_paid():
     game = _small_game()
+    base = game.buildings_of(0)[0]
+    for _ in range(3):
+        assert game.train(base.id, WORKER)
+    game.step()
+    assert game.players[0].resources == STARTING_RESOURCES - WORKER.cost
+
+
+def test_queue_limit_is_five():
+    game = _small_game()
+    base = game.buildings_of(0)[0]
+    assert all(game.train(base.id, WORKER) for _ in range(5))
+    assert not game.train(base.id, WORKER)
+
+
+def test_queue_waits_for_resources():
+    game = _small_game()
+    base = game.buildings_of(0)[0]
     game.players[0].resources = 0
-    assert not game.train(game.buildings_of(0)[0].id, SOLDIER)
+    before = len(game.units_of(0))
+    assert game.train(base.id, SOLDIER)
+    _run(game, SOLDIER.train_time + 2)
+    assert len(game.units_of(0)) == before
+    game.players[0].resources = SOLDIER.cost
+    _run(game, SOLDIER.train_time + 1)
+    assert len(game.units_of(0)) == before + 1
+    assert game.players[0].resources == 0
+
+
+def test_cancel_refunds_paid_front_only():
+    game = _small_game()
+    base = game.buildings_of(0)[0]
+    game.train(base.id, WORKER)
+    game.train(base.id, SOLDIER)
+    game.step()
+    game.cancel_training(base.id, 1)
+    assert game.players[0].resources == STARTING_RESOURCES - WORKER.cost
+    game.cancel_training(base.id, 0)
+    assert game.players[0].resources == STARTING_RESOURCES
+    assert base.queue == []
+
+
+def test_rally_point_sends_new_workers_to_gather():
+    game = _small_game()
+    base = game.buildings_of(0)[0]
+    game.set_rally(base.id, (10, 5))
+    game.train(base.id, WORKER)
+    _run(game, WORKER.train_time + 1)
+    newest = max(game.units_of(0), key=lambda u: u.id)
+    assert isinstance(newest.order, Gather)
+
+
+def test_attack_move_fights_on_the_way():
+    game = _small_game()
+    soldier = game.spawn_unit(SOLDIER, 0, (2, 15))
+    creep = game.spawn_unit(CREEP, HAZARD_OWNER, (10, 15))
+    creep.set_order(Move((10, 15)))
+    game.order_attack_move([soldier.id], (18, 15))
+    _run(game, 30)
+    assert creep.id not in game.units
+    assert soldier.cell == (18, 15)
+    assert soldier.order is None
 
 
 def test_hazard_wave_spawns_creeps():
