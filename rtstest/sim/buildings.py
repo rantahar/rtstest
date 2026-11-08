@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from rtstest.sim.entities import Entity
     from rtstest.sim.game import Game
 
-__all__ = ["BuildingType", "BASE", "BARRACKS", "BUILDABLE", "MAX_QUEUE", "Building"]
+__all__ = ["BuildingType", "BASE", "BARRACKS", "PIT", "BUILDABLE", "MAX_QUEUE", "Building"]
 
 MAX_QUEUE = 5
 START_HP_FRACTION = 0.1
@@ -50,6 +50,8 @@ class BuildingType:
 BASE = BuildingType("base", 600, (3, 3), (WORKER,), cost=400, build_time=60.0,
                     stores_resources=True)
 BARRACKS = BuildingType("barracks", 400, (3, 3), (SOLDIER,), cost=150, build_time=30.0)
+PIT = BuildingType("pit", 1500, (1, 1))
+"""Hazard building opened by mined-out resources; spawns creeps (see ``hazard``)."""
 BUILDABLE = (BARRACKS,)
 
 

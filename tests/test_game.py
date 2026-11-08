@@ -1,11 +1,11 @@
-"""Headless simulation tests: gathering, training, hazard waves, combat,
+"""Headless simulation tests: gathering, training, hazard pits, combat,
 reservations and pushback."""
 
 import math
 
 from rtstest.ai import ScriptedAI
-from rtstest.sim import (BARRACKS, BASE, CREEP, HAZARD_OWNER, SOLDIER, STARTING_RESOURCES, TICK,
-                         WORKER, Build, Game, Gather, Move)
+from rtstest.sim import (BARRACKS, BASE, CREEP, HAZARD_OWNER, PIT, SOLDIER, STARTING_RESOURCES,
+                         TICK, WORKER, Build, Game, Gather, Move)
 from rtstest.world import Cell, Grid, MapInfo, Terrain, chebyshev, ring_cells
 
 
@@ -14,7 +14,6 @@ def _small_game() -> Game:
     grid = Grid(20, 20)
     grid.set_terrain((10, 5), Terrain.RESOURCE, amount=500)
     game = Game(map_info=MapInfo(grid, [(5, 5)]))
-    game.hazard.next_wave_time = 1e9
     return game
 
 
@@ -108,12 +107,39 @@ def test_attack_move_fights_on_the_way():
     assert soldier.order is None
 
 
-def test_hazard_wave_spawns_creeps():
+def test_mined_out_resource_opens_pit_towards_miner():
+    grid = Grid(20, 20)
+    grid.set_terrain((12, 5), Terrain.RESOURCE, amount=2)
+    game = Game(map_info=MapInfo(grid, [(5, 5)]))
+    worker = game.units_of(0)[0]
+    game.order_gather([worker.id], (12, 5))
+    _run(game, 15)
+    assert grid.terrain_at((12, 5)) == Terrain.GRASS
+    pits = [b for b in game.buildings_of(HAZARD_OWNER) if b.type is PIT]
+    assert len(pits) == 1 and game.pit_count == 1
+    assert 2 <= chebyshev(pits[0].cell, (12, 5)) <= 5
+    base_x, base_y = game.buildings_of(0)[0].center
+    assert (math.hypot(pits[0].cell[0] + 0.5 - base_x, pits[0].cell[1] + 0.5 - base_y)
+            < math.hypot(12.5 - base_x, 5.5 - base_y))
+
+
+def test_pit_spawns_creeps_up_to_cap():
     game = _small_game()
-    game.hazard.next_wave_time = 0
-    game.step()
-    assert game.hazard.wave == 1
+    game.hazard.resource_depleted(game, (15, 15), 0)
+    _run(game, 21)
+    assert len(game.units_of(HAZARD_OWNER)) == 1
+    _run(game, 80)
     assert len(game.units_of(HAZARD_OWNER)) == 3
+
+
+def test_destroyed_pit_stops_spawning():
+    game = _small_game()
+    game.hazard.resource_depleted(game, (15, 15), 0)
+    pit = game.buildings_of(HAZARD_OWNER)[0]
+    pit.take_damage(pit.max_hp)
+    _run(game, 25)
+    assert game.pit_count == 0
+    assert not game.units_of(HAZARD_OWNER)
 
 
 def test_soldiers_kill_creep():
@@ -128,7 +154,6 @@ def test_soldiers_kill_creep():
 def test_players_do_not_fight_unprovoked():
     grid = Grid(30, 12)
     game = Game(map_info=MapInfo(grid, [(4, 5), (25, 5)]), human_player=None)
-    game.hazard.next_wave_time = 1e9
     a = game.spawn_unit(SOLDIER, 0, (14, 5))
     b = game.spawn_unit(SOLDIER, 1, (15, 5))
     _run(game, 5)
@@ -137,14 +162,15 @@ def test_players_do_not_fight_unprovoked():
 
 def test_full_game_runs():
     game = Game(seed=1)
+    for p in game.players[1:]:
+        game.add_controller(ScriptedAI(p.id))
     _run(game, 120)
-    assert game.hazard.wave >= 2
+    assert game.time >= 119
 
 
 def _open_game(width: int = 30, height: int = 30) -> Game:
-    """One player, base around (3, 3), on an open map with no hazard."""
+    """One player, base around (3, 3), on an open map with no resources (so no pits)."""
     game = Game(map_info=MapInfo(Grid(width, height), [(3, 3)]))
-    game.hazard.next_wave_time = 1e9
     return game
 
 
@@ -249,7 +275,6 @@ def test_miner_displaces_parked_friendly_unit():
 def test_miner_does_not_displace_other_players_units():
     grid = Grid(30, 30)
     game = Game(map_info=MapInfo(grid, [(3, 3), (26, 26)]), human_player=None)
-    game.hazard.next_wave_time = 1e9
     spot = _walled_resource(game)
     other = game.spawn_unit(SOLDIER, 1, (10, 15))
     game.order_move([other.id], spot)
@@ -352,7 +377,6 @@ def test_ai_builds_barracks_and_soldiers():
     game = Game(seed=1, human_player=None)
     for p in game.players:
         game.add_controller(ScriptedAI(p.id))
-    game.hazard.next_wave_time = 1e9
     _run(game, 240)
     for p in game.players:
         types = {b.type for b in game.buildings_of(p.id) if b.complete}

@@ -6,6 +6,14 @@ Panel buttons and their hotkeys either train units, open the build menu, or
 start targeting mode, where the next left-click on the map gives that order
 and right-click or Esc cancels. Placing a building is a targeting mode that
 shows a ghost footprint under the mouse.
+
+Selection: left-click or drag selects; Ctrl+click selects all own visible
+units (or buildings) of the clicked type; Ctrl+number stores the selection
+as a control group and the number alone recalls it. With Shift held, any of
+these adds to the current selection instead of replacing it.
+
+Camera: arrow keys, the screen edge, or dragging with the middle mouse
+button; the wheel zooms.
 """
 
 import math
@@ -23,6 +31,7 @@ EDGE_SCROLL_MARGIN = 6
 SCROLL_SPEED = 900
 DRAG_THRESHOLD = 5
 TRAIN_KEYS = {pygame.K_q: WORKER, pygame.K_w: SOLDIER}
+GROUP_KEYS = {pygame.K_0 + n: n for n in range(10)}
 
 
 class InputController:
@@ -37,8 +46,10 @@ class InputController:
         self.targeting: str | None = None
         self.menu: str | None = None
         self.placing: BuildingType | None = None
+        self.groups: dict[int, set[int]] = {}
         self._drag_start: tuple[int, int] | None = None
         self._drag_now: tuple[int, int] | None = None
+        self._pan_last: tuple[int, int] | None = None
 
     @property
     def _screen_size(self) -> tuple[int, int]:
@@ -59,6 +70,13 @@ class InputController:
                 self.cancel_targeting()
             else:
                 self._command(event.pos)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 2:
+            self._pan_last = event.pos
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 2:
+            self._pan_last = None
+        elif event.type == pygame.MOUSEMOTION and self._pan_last is not None:
+            self.camera.pan(self._pan_last[0] - event.pos[0], self._pan_last[1] - event.pos[1])
+            self._pan_last = event.pos
         elif event.type == pygame.MOUSEMOTION and self._drag_start is not None:
             self._drag_now = event.pos
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -68,7 +86,7 @@ class InputController:
         elif event.type == pygame.MOUSEWHEEL:
             self.camera.zoom(event.y, pygame.mouse.get_pos())
         elif event.type == pygame.KEYDOWN:
-            self._hotkey(event.key)
+            self._hotkey(event.key, event.mod)
 
     def cancel_targeting(self) -> bool:
         """Leave targeting/placing mode, else close the build menu; False if neither was open."""
@@ -99,7 +117,7 @@ class InputController:
         keys = pygame.key.get_pressed()
         dx = keys[pygame.K_RIGHT] - keys[pygame.K_LEFT]
         dy = keys[pygame.K_DOWN] - keys[pygame.K_UP]
-        if pygame.mouse.get_focused() and self._drag_start is None:
+        if pygame.mouse.get_focused() and self._drag_start is None and self._pan_last is None:
             mx, my = pygame.mouse.get_pos()
             dx += (mx >= self.camera.view_w - EDGE_SCROLL_MARGIN) - (mx < EDGE_SCROLL_MARGIN)
             dy += (my >= self.camera.view_h - EDGE_SCROLL_MARGIN) - (my < EDGE_SCROLL_MARGIN)
@@ -128,14 +146,45 @@ class InputController:
         return abs(a[0] - b[0]) > DRAG_THRESHOLD or abs(a[1] - b[1]) > DRAG_THRESHOLD
 
     def _select(self, start: tuple[int, int], end: tuple[int, int]) -> None:
+        """Box or click selection; Ctrl+click picks all visible of a type, Shift adds."""
+        mods = pygame.key.get_mods()
         if self._is_drag(start, end):
             x0, y0 = self.camera.screen_to_world(*start)
             x1, y1 = self.camera.screen_to_world(*end)
+            picked = {u.id for u in self.game.units_in_rect(x0, y0, x1, y1, self.player_id)}
+        else:
+            e = self.game.entity_at(*self.camera.screen_to_world(*end))
+            if e is None or e.owner != self.player_id:
+                picked = set()
+            elif mods & pygame.KMOD_CTRL:
+                picked = self._visible_of_type(e.type)
+            else:
+                picked = {e.id}
+        self._set_selection(picked, bool(mods & pygame.KMOD_SHIFT))
+
+    def _set_selection(self, picked: set[int], add: bool) -> None:
+        """Replace the selection with ``picked``, or add to it."""
+        self.selection = self.selection | picked if add else set(picked)
+
+    def _visible_of_type(self, etype: UnitType | BuildingType) -> set[int]:
+        """Ids of own units or buildings of ``etype`` that are at least partly on screen."""
+        x0, y0 = self.camera.screen_to_world(0, 0)
+        x1, y1 = self.camera.screen_to_world(*self._screen_size)
+        if isinstance(etype, UnitType):
             units = self.game.units_in_rect(x0, y0, x1, y1, self.player_id)
-            self.selection = {u.id for u in units}
+            return {u.id for u in units if u.type is etype}
+        return {b.id for b in self.game.buildings_of(self.player_id) if b.type is etype
+                and _overlaps(b.bounds(), (x0, y0, x1, y1))}
+
+    def _group_key(self, n: int, mods: int) -> None:
+        """Ctrl+number stores the selection; number recalls the group (Shift adds it)."""
+        if mods & pygame.KMOD_CTRL:
+            self.groups[n] = set(self.selection)
             return
-        e = self.game.entity_at(*self.camera.screen_to_world(*end))
-        self.selection = {e.id} if e is not None and e.owner == self.player_id else set()
+        group = {i for i in self.groups.get(n, ()) if self.game.entity(i) is not None}
+        self.groups[n] = group
+        if group:
+            self._set_selection(group, bool(mods & pygame.KMOD_SHIFT))
 
     def _panel_click(self, pos: tuple[int, int], button: int) -> None:
         """Clicks on the panel: cancel a queue slot (either button) or press a command button."""
@@ -151,8 +200,12 @@ class InputController:
             if pressed is not None:
                 self._activate(pressed)
 
-    def _hotkey(self, key: int) -> None:
-        """A key matching a panel button presses it; with nothing selected, Q/W train at the base."""
+    def _hotkey(self, key: int, mods: int = 0) -> None:
+        """Number keys handle control groups; a key matching a panel button presses it;
+        with nothing selected, Q/W train at the base."""
+        if key in GROUP_KEYS:
+            self._group_key(GROUP_KEYS[key], mods)
+            return
         buttons = self.panel.buttons(self.game, self.player_id, self.selection, self.menu)
         for button in buttons:
             if button.hotkey == key:
@@ -230,3 +283,8 @@ class InputController:
         selected = [b for b in own if b.id in self.selection]
         for b in selected or own[:1]:
             self.game.train(b.id, utype)
+
+
+def _overlaps(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    """Whether two ``(x0, y0, x1, y1)`` rectangles overlap."""
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]

@@ -5,7 +5,8 @@ resource cell per tick for a free mining spot next to it, taking over a spot
 held by a friendly non-gathering unit if needed (that unit is displaced),
 and otherwise switches to a random nearby resource for the next tick. It
 mines only while standing on its reserved spot and releases the spot when
-it leaves to deposit at the nearest complete base.
+it leaves to deposit at the nearest complete base. Mining out a cell
+opens a hazard pit (``Hazard.resource_depleted``).
 """
 
 from __future__ import annotations
@@ -61,6 +62,8 @@ class GatheringBehaviour:
             if self._work_timer >= GATHER_TIME:
                 self._work_timer = 0.0
                 self.carrying += grid.take_resource(order.resource, 1)
+                if grid.terrain_at(order.resource) != Terrain.RESOURCE:
+                    game.hazard.resource_depleted(game, order.resource, self.owner)
                 if self.carrying >= self.type.gather_capacity:
                     order.returning = True
             return

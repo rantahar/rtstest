@@ -72,7 +72,7 @@ class Renderer:
         for b in game.buildings.values():
             w, h = b.type.size
             sx, sy = camera.world_to_screen(*b.cell)
-            color = game.players[b.owner].color
+            color = None if b.owner == HAZARD_OWNER else game.players[b.owner].color
             sprite = self.sprites.get(b.type.name, (w * t, h * t), color)
             if not b.complete:
                 sprite = sprite.copy()
@@ -129,9 +129,8 @@ class Renderer:
         sw, sh = self.screen.get_size()
         player = game.players[player_id]
         minutes, seconds = divmod(int(game.time), 60)
-        next_wave = int(game.next_wave_in)
         top = (f"Resources {player.resources}   Time {minutes:02d}:{seconds:02d}   "
-               f"Wave {game.wave}   next in {next_wave}s   Selected {len(selection)}")
+               f"Pits {game.pit_count}   Selected {len(selection)}")
         self.screen.fill(HUD_BG, (0, 0, sw, HUD_HEIGHT))
         self.screen.blit(self.font.render(top, True, TEXT_COLOR), (8, 5))
         x = sw - 8

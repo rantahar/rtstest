@@ -12,7 +12,8 @@ Public API (import from ``rtstest.sim``):
   implement it (documented read-only attributes only).
 - ``UnitType`` with ``WORKER``, ``SOLDIER``, ``CREEP``; ``BuildingType``
   with ``BASE`` (trains workers, stores resources), ``BARRACKS`` (trains
-  soldiers), ``BUILDABLE`` (what workers can build); ``MAX_QUEUE``.
+  soldiers), ``PIT`` (hazard pit: opened by each mined-out resource cell,
+  spawns creeps), ``BUILDABLE`` (what workers can build); ``MAX_QUEUE``.
 - Orders, to inspect ``Unit.order``: ``Move``, ``Gather``, ``Attack``,
   ``AttackMove``, ``Build``.
 - ``Player``, ``HAZARD_OWNER`` (owner of hazard creatures),
@@ -22,11 +23,12 @@ Modules: ``game`` (state, lookups, commands, step), ``entities`` (protocol),
 ``unit_types``, ``orders``, ``units`` (Unit, movement, reservations) with its
 behaviour mixins ``combat``, ``gathering`` and ``construction`` (which also
 places building sites), ``services`` (searches and displacement used during
-updates), ``buildings``, ``players``, ``hazard`` (waves), ``steering``
+updates), ``buildings``, ``players``, ``hazard`` (pits and their creeps), ``steering``
 (pushback). Computer players live outside, in ``rtstest.ai``.
 """
 
-from rtstest.sim.buildings import BARRACKS, BASE, BUILDABLE, MAX_QUEUE, Building, BuildingType
+from rtstest.sim.buildings import (BARRACKS, BASE, BUILDABLE, MAX_QUEUE, PIT, Building,
+                                   BuildingType)
 from rtstest.sim.entities import Entity
 from rtstest.sim.game import TICK, Controller, Game
 from rtstest.sim.players import HAZARD_OWNER, STARTING_RESOURCES, Player
@@ -35,6 +37,6 @@ from rtstest.sim.unit_types import CREEP, SOLDIER, WORKER, UnitType
 from rtstest.sim.units import Unit
 
 __all__ = ["Game", "TICK", "Controller", "Entity", "Unit", "Building", "UnitType", "BuildingType",
-           "WORKER", "SOLDIER", "CREEP", "BASE", "BARRACKS", "BUILDABLE", "MAX_QUEUE",
+           "WORKER", "SOLDIER", "CREEP", "BASE", "BARRACKS", "PIT", "BUILDABLE", "MAX_QUEUE",
            "Move", "Gather", "Attack", "AttackMove", "Build",
            "Player", "HAZARD_OWNER", "STARTING_RESOURCES"]

@@ -45,8 +45,7 @@ class Game:
 
     Public attributes (read-only outside ``sim``): ``grid``, ``players``
     (list indexed by player id), ``units`` and ``buildings`` (dicts by id),
-    ``time`` (seconds), ``hazard`` (its ``next_wave_time`` may be set, e.g.
-    by tests). Properties: ``wave``, ``next_wave_in``.
+    ``time`` (seconds), ``hazard``. Property: ``pit_count``.
 
     For UI and computer players: ``step``, ``add_controller``, the lookups (``entity``,
     ``entity_at``, ``entities``, ``units_of``, ``buildings_of``,
@@ -86,14 +85,9 @@ class Game:
                     self.spawn_unit(WORKER, player.id, cell)
 
     @property
-    def wave(self) -> int:
-        """Number of hazard waves spawned so far."""
-        return self.hazard.wave
-
-    @property
-    def next_wave_in(self) -> float:
-        """Seconds until the next hazard wave (0 if due)."""
-        return max(0.0, self.hazard.next_wave_time - self.time)
+    def pit_count(self) -> int:
+        """Number of open hazard pits."""
+        return self.hazard.pit_count
 
     def add_controller(self, controller: Controller) -> None:
         """Step ``controller`` at the start of every tick, e.g. a computer player."""
