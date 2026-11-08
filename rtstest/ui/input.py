@@ -14,7 +14,7 @@ import pygame
 
 from rtstest.sim import SOLDIER, WORKER, Building, BuildingType, Game, UnitType
 from rtstest.ui.panel import Button, Panel, panel_rect, selected_building, selected_units
-from rtstest.ui.render import Camera
+from rtstest.ui.camera import Camera
 from rtstest.world import Terrain
 
 __all__ = ["InputController"]
