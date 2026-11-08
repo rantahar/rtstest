@@ -12,11 +12,13 @@ import random
 from typing import TYPE_CHECKING
 
 from rtstest.sim.players import HAZARD_OWNER
-from rtstest.sim.units import CREEP, Unit
+from rtstest.sim.services import free_cell_near
+from rtstest.sim.unit_types import CREEP
 from rtstest.world import Cell, Grid
 
 if TYPE_CHECKING:
     from rtstest.sim.game import Game
+    from rtstest.sim.units import Unit
 
 __all__ = ["Hazard"]
 
@@ -50,7 +52,7 @@ class Hazard:
         spawned = []
         if edge is not None:
             for _ in range(BASE_WAVE_SIZE + self.wave):
-                cell = game.free_cell_near([edge])
+                cell = free_cell_near(game, [edge])
                 if cell is None:
                     break
                 spawned.append(game.spawn_unit(CREEP, HAZARD_OWNER, cell, scale))

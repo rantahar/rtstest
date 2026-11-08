@@ -20,7 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from rtstest.sim.units import SOLDIER, WORKER, UnitType
+from rtstest.sim.services import free_cell_near
+from rtstest.sim.unit_types import SOLDIER, WORKER, UnitType
 from rtstest.world import Cell
 
 if TYPE_CHECKING:
@@ -159,7 +160,7 @@ class Building:
         self._progress += dt
         if self._progress < front.train_time:
             return
-        cell = game.free_cell_near(self.cells())
+        cell = free_cell_near(game, self.cells())
         if cell is not None:
             unit = game.spawn_unit(self.queue.pop(0), self.owner, cell)
             self._progress = 0.0

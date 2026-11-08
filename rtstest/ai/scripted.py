@@ -5,7 +5,8 @@ ring a few cells from the base (resumed by another worker if its builder
 dies), and it trains soldiers continuously.
 
 Each ``ScriptedAI`` thinks once per ``THINK_INTERVAL`` and acts only through
-the ``Game`` command methods, as a human player would. It never attacks other
+the ``Game`` command methods, as a human player would. Register one per
+computer player with ``Game.add_controller``. It never attacks other
 players; diplomacy is not implemented yet.
 """
 
@@ -14,13 +15,11 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from rtstest.sim.buildings import BARRACKS, BASE, Building
-from rtstest.sim.players import HAZARD_OWNER
-from rtstest.sim.units import SOLDIER, WORKER, Attack, Build, Unit
+from rtstest.sim import BARRACKS, BASE, HAZARD_OWNER, SOLDIER, WORKER, Attack, Build
 from rtstest.world import Cell, ring_cells
 
 if TYPE_CHECKING:
-    from rtstest.sim.game import Game
+    from rtstest.sim import Building, Game, Unit
 
 __all__ = ["ScriptedAI"]
 

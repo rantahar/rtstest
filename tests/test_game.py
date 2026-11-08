@@ -3,6 +3,7 @@ reservations and pushback."""
 
 import math
 
+from rtstest.ai import ScriptedAI
 from rtstest.sim import (BARRACKS, BASE, CREEP, HAZARD_OWNER, SOLDIER, STARTING_RESOURCES, TICK,
                          WORKER, Build, Game, Gather, Move)
 from rtstest.world import Cell, Grid, MapInfo, Terrain, chebyshev, ring_cells
@@ -248,7 +249,6 @@ def test_miner_displaces_parked_friendly_unit():
 def test_miner_does_not_displace_other_players_units():
     grid = Grid(30, 30)
     game = Game(map_info=MapInfo(grid, [(3, 3), (26, 26)]), human_player=None)
-    game.ais = []
     game.hazard.next_wave_time = 1e9
     spot = _walled_resource(game)
     other = game.spawn_unit(SOLDIER, 1, (10, 15))
@@ -335,14 +335,23 @@ def test_one_builder_per_building():
 
 def test_unfinished_building_does_not_store_resources():
     game = _open_game()
-    worker = _build_barracks(game)
+    _build_barracks(game)
     _run(game, 8)
     site = [b for b in game.buildings_of(0) if b.type is BARRACKS][0]
-    assert game.nearest_base(0, site.center[0], site.center[1]).type is BASE
+    carrier = game.spawn_unit(WORKER, 0, (site.cell[0] + 3, site.cell[1] + 1))
+    carrier.carrying = 10
+    carrier.set_order(Gather((0, 0), returning=True))
+    before = game.players[0].resources
+    _run(game, 0.5)
+    assert game.players[0].resources == before
+    _run(game, 15)
+    assert game.players[0].resources == before + 10
 
 
 def test_ai_builds_barracks_and_soldiers():
     game = Game(seed=1, human_player=None)
+    for p in game.players:
+        game.add_controller(ScriptedAI(p.id))
     game.hazard.next_wave_time = 1e9
     _run(game, 240)
     for p in game.players:

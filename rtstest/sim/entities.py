@@ -6,11 +6,12 @@ shape of an entity without importing ``units`` or ``buildings``.
 
 from __future__ import annotations
 
+import math
 from typing import Protocol
 
 from rtstest.world import Cell
 
-__all__ = ["Entity"]
+__all__ = ["Entity", "point_rect_distance"]
 
 
 class Entity(Protocol):
@@ -37,3 +38,10 @@ class Entity(Protocol):
 
     def take_damage(self, amount: float, attacker: Entity | None = None) -> None:
         """Lose hp; ``attacker`` lets units retaliate."""
+
+
+def point_rect_distance(px: float, py: float,
+                        bounds: tuple[float, float, float, float]) -> float:
+    """Distance from a point to an axis-aligned rectangle such as ``Entity.bounds()`` (0 inside)."""
+    x0, y0, x1, y1 = bounds
+    return math.hypot(max(x0 - px, 0.0, px - x1), max(y0 - py, 0.0, py - y1))

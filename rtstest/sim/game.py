@@ -1,36 +1,43 @@
 """Game state: map, players, units, buildings and the fixed-step update.
 
-``Game.step`` advances everything by ``TICK`` seconds. Units, buildings, the
-hazard and the AI query the world through this object, and the ``order_*``
-(including ``order_build`` and ``order_resume``), ``set_rally``, ``train`` and
-``cancel_training`` methods are the command interface shared by the UI and
-computer players. Hostility between owners is decided in one place,
-``is_hostile``.
+``Game.step`` advances everything by ``TICK`` seconds. The lookups and the
+``order_*`` (including ``order_build`` and ``order_resume``), ``set_rally``,
+``train`` and ``cancel_training`` commands are the interface shared by the UI
+and computer players. Services that units and buildings need while updating
+live in ``services`` and ``construction``. Hostility between owners is
+decided in one place, ``is_hostile``.
 """
 
 from __future__ import annotations
 
 import math
 import random
-from collections import deque
 from collections.abc import Iterable, Iterator
+from typing import Protocol
 
-from rtstest.sim.ai import ScriptedAI
 from rtstest.sim.buildings import BASE, Building, BuildingType
+from rtstest.sim.construction import can_place
 from rtstest.sim.entities import Entity
 from rtstest.sim.hazard import Hazard
+from rtstest.sim.orders import Attack, AttackMove, Build, Gather, Move
 from rtstest.sim.players import HAZARD_OWNER, make_players
+from rtstest.sim.services import free_cell_near, free_cells_around
 from rtstest.sim.steering import apply_pushback
-from rtstest.sim.units import WORKER, Attack, AttackMove, Build, Gather, Move, Unit, UnitType
-from rtstest.world import Cell, MapInfo, Terrain, generate, ring_cells
+from rtstest.sim.unit_types import WORKER, UnitType
+from rtstest.sim.units import Unit
+from rtstest.world import Cell, MapInfo, Terrain, generate
 
-__all__ = ["Game", "TICK"]
+__all__ = ["Game", "TICK", "Controller"]
 
 TICK = 1 / 20
 STARTING_WORKERS = 3
-FREE_CELL_SEARCH_LIMIT = 400
-RETALIATE_RANGE_FACTOR = 2.0
 
+
+class Controller(Protocol):
+    """A computer player (or any other driver) stepped with the game."""
+
+    def update(self, game: Game, dt: float) -> None:
+        """Look at the game and issue commands; called at the start of each tick."""
 
 
 class Game:
@@ -41,16 +48,13 @@ class Game:
     ``time`` (seconds), ``hazard`` (its ``next_wave_time`` may be set, e.g.
     by tests). Properties: ``wave``, ``next_wave_in``.
 
-    For UI and computer players: ``step``, the lookups (``entity``,
+    For UI and computer players: ``step``, ``add_controller``, the lookups (``entity``,
     ``entity_at``, ``entities``, ``units_of``, ``buildings_of``,
     ``units_in_rect``, ``nearest_resource``, ``can_place``) and the commands
     (``order_*``, ``train``, ``cancel_training``, ``set_rally``).
 
-    Package-internal services for units and buildings: ``spawn_unit``,
-    ``place_building``, ``nearest_hostile``, ``nearest_base``,
-    ``random_resource_near``, ``free_cell_near``, ``free_cells_around``,
-    ``displace``, ``is_displaceable_by``, ``start_construction``,
-    ``is_building``, ``footprint``, ``is_hostile``, ``ais``.
+    Package-internal: ``spawn_unit``, ``place_building``, ``is_hostile``,
+    ``entities``, ``rng`` (seeded random source for the simulation).
     """
 
     def __init__(self, width: int = 64, height: int = 64, n_players: int = 3,
@@ -68,16 +72,16 @@ class Game:
         self.units: dict[int, Unit] = {}
         self.buildings: dict[int, Building] = {}
         self.hazard = Hazard(seed)
-        self._rng = random.Random(seed + 2)
+        self.rng = random.Random(seed + 2)
         self.time = 0.0
         self._next_id = 1
-        self.ais = [ScriptedAI(p.id) for p in self.players if p.is_ai]
+        self._controllers: list[Controller] = []
         for player, (sx, sy) in zip(self.players, map_info.starts):
             base = self.place_building(BASE, player.id, (sx - 1, sy - 1))
             if base is None:
                 raise ValueError(f"no room for a base at start {(sx, sy)}")
             for _ in range(STARTING_WORKERS):
-                cell = self.free_cell_near(base.cells())
+                cell = free_cell_near(self, base.cells())
                 if cell is not None:
                     self.spawn_unit(WORKER, player.id, cell)
 
@@ -90,6 +94,10 @@ class Game:
     def next_wave_in(self) -> float:
         """Seconds until the next hazard wave (0 if due)."""
         return max(0.0, self.hazard.next_wave_time - self.time)
+
+    def add_controller(self, controller: Controller) -> None:
+        """Step ``controller`` at the start of every tick, e.g. a computer player."""
+        self._controllers.append(controller)
 
     # --- creation and lookup -------------------------------------------
 
@@ -159,125 +167,13 @@ class Game:
         """
         return a != b and (a == HAZARD_OWNER or b == HAZARD_OWNER)
 
-    def nearest_hostile(self, unit: Unit) -> Entity | None:
-        """What an idle combat unit should attack, or None.
-
-        A recent attacker within twice the sight range comes first. Hazard
-        creatures see the whole map; others see ``unit.type.sight``.
-        """
-        sight = unit.type.sight
-        if unit.last_attacker is not None:
-            attacker = self.entity(unit.last_attacker)
-            if (attacker is not None and attacker.alive
-                    and unit.distance_to(attacker) <= sight * RETALIATE_RANGE_FACTOR):
-                return attacker
-            unit.last_attacker = None
-        radius = math.inf if unit.owner == HAZARD_OWNER else sight
-        best, best_d = None, radius
-        for e in self.entities():
-            if e.alive and self.is_hostile(unit.owner, e.owner):
-                d = unit.distance_to(e)
-                if d <= best_d:
-                    best, best_d = e, d
-        return best
-
-    def nearest_base(self, owner: int, x: float, y: float) -> Building | None:
-        """The owner's complete resource-storing building closest to a point."""
-        buildings = [b for b in self.buildings_of(owner)
-                     if b.complete and b.type.stores_resources]
-        if not buildings:
-            return None
-        return min(buildings, key=lambda b: math.hypot(b.center[0] - x, b.center[1] - y))
-
-    @staticmethod
-    def footprint(btype: BuildingType, cell: Cell) -> list[Cell]:
-        """Cells a building of ``btype`` with top-left ``cell`` would cover."""
-        w, h = btype.size
-        return [(cell[0] + dx, cell[1] + dy) for dy in range(h) for dx in range(w)]
-
     def can_place(self, btype: BuildingType, cell: Cell, owner: int) -> bool:
-        """Whether ``owner`` may place ``btype`` here.
+        """Whether ``owner`` may place ``btype`` with top-left ``cell`` now.
 
         Every cell must be passable and either unreserved or reserved by one
         of the owner's own idle or moving units (which will be moved aside).
         """
-        for c in self.footprint(btype, cell):
-            if not self.grid.is_passable(c):
-                return False
-            holder = self.units.get(self.grid.reserved_by(c))
-            if holder is not None and (holder.owner != owner
-                                       or not (holder.order is None
-                                               or isinstance(holder.order, Move))):
-                return False
-        return True
-
-    def start_construction(self, worker: Unit, btype: BuildingType,
-                           cell: Cell) -> Building | None:
-        """Pay for and place an unfinished building; None if blocked or unaffordable.
-
-        Units standing on the site are moved to free cells next to it.
-        """
-        player = self.players[worker.owner]
-        if player.resources < btype.cost or not self.can_place(btype, cell, worker.owner):
-            return None
-        cells = set(self.footprint(btype, cell))
-        for u in self.units.values():
-            if u.reserved in cells:
-                u.release_reservation()
-        building = self.place_building(btype, worker.owner, cell, complete=False)
-        if building is None:
-            return None
-        player.resources -= btype.cost
-        for u in self.units.values():
-            if u.cell in cells:
-                free = self.free_cell_near(cells)
-                if free is not None:
-                    u.x, u.y = free[0] + 0.5, free[1] + 0.5
-                    u.path = []
-        return building
-
-    def is_building(self, uid: int | None, building_id: int, other: Unit) -> bool:
-        """Whether unit ``uid`` (not ``other``) is currently constructing the building."""
-        unit = self.units.get(uid)
-        return (unit is not None and unit is not other and isinstance(unit.order, Build)
-                and unit.order.building_id == building_id)
-
-    def is_displaceable_by(self, uid: int, miner: Unit) -> bool:
-        """Whether unit ``uid`` must give up its cell to ``miner``: friendly and not gathering."""
-        other = self.units.get(uid)
-        return (other is not None and other is not miner and other.owner == miner.owner
-                and not isinstance(other.order, Gather))
-
-    def displace(self, uid: int) -> None:
-        """Make a unit give up its reserved cell and step to a random free cell nearby.
-
-        Idle and moving units get a new move order there; units with other
-        orders only lose their reservation and pick a new stand cell themselves.
-        """
-        unit = self.units.get(uid)
-        if unit is None:
-            return
-        unit.release_reservation()
-        if unit.order is not None and not isinstance(unit.order, Move):
-            return
-        cells = [c for ring in (1, 2) for c in ring_cells([unit.cell], ring)
-                 if self.grid.can_stand(c, uid)]
-        if cells:
-            unit.set_order(Move(self._rng.choice(cells)))
-
-    def random_resource_near(self, cell: Cell, radius: int) -> Cell | None:
-        """A random resource cell other than ``cell`` within ``radius`` cells (square scan).
-
-        Falls back to the nearest resource anywhere when none is that close.
-        """
-        found = [(x, y)
-                 for y in range(cell[1] - radius, cell[1] + radius + 1)
-                 for x in range(cell[0] - radius, cell[0] + radius + 1)
-                 if (x, y) != cell and self.grid.in_bounds((x, y))
-                 and self.grid.terrain_at((x, y)) == Terrain.RESOURCE]
-        if found:
-            return self._rng.choice(found)
-        return self.nearest_resource(cell, math.inf)
+        return can_place(self, btype, cell, owner)
 
     def nearest_resource(self, cell: Cell, radius: float) -> Cell | None:
         """The closest resource cell within ``radius`` cells, if any."""
@@ -288,47 +184,12 @@ class Game:
                 best, best_d = r, d
         return best
 
-    def free_cell_near(self, cells: Iterable[Cell]) -> Cell | None:
-        """A passable cell next to ``cells`` (searching outwards), preferring no unit on it."""
-        start = set(cells)
-        unit_cells = {u.cell for u in self.units.values()}
-        queue = deque(start)
-        seen = set(start)
-        fallback = None
-        while queue and len(seen) < FREE_CELL_SEARCH_LIMIT:
-            for n in self.grid.adjacent_cells(queue.popleft()):
-                if n in seen:
-                    continue
-                seen.add(n)
-                queue.append(n)
-                if self.grid.is_passable(n):
-                    if n not in unit_cells:
-                        return n
-                    if fallback is None:
-                        fallback = n
-        return fallback
-
-    def free_cells_around(self, cell: Cell, count: int) -> list[Cell]:
-        """Up to ``count`` passable cells nearest to ``cell``, for spreading a group."""
-        result = [cell] if self.grid.is_passable(cell) else []
-        queue = deque([cell])
-        seen = {cell}
-        while queue and len(result) < count and len(seen) < FREE_CELL_SEARCH_LIMIT:
-            for n in self.grid.adjacent_cells(queue.popleft()):
-                if n in seen:
-                    continue
-                seen.add(n)
-                queue.append(n)
-                if self.grid.is_passable(n):
-                    result.append(n)
-        return result[:count]
-
     # --- commands --------------------------------------------------------
 
     def order_move(self, unit_ids: Iterable[int], cell: Cell) -> None:
         """Send units to a cell, spread over the free cells around it."""
         units = self._units(unit_ids)
-        targets = self.free_cells_around(cell, len(units))
+        targets = free_cells_around(self, cell, len(units))
         if not targets:
             return
         for i, u in enumerate(units):
@@ -359,7 +220,7 @@ class Game:
     def order_attack_move(self, unit_ids: Iterable[int], cell: Cell) -> None:
         """Units walk to a cell, fighting hostiles they meet on the way."""
         units = self._units(unit_ids)
-        targets = self.free_cells_around(cell, len(units))
+        targets = free_cells_around(self, cell, len(units))
         if not targets:
             return
         for i, u in enumerate(units):
@@ -414,8 +275,8 @@ class Game:
     def step(self) -> None:
         """Advance the whole game by one ``TICK``."""
         self.time += TICK
-        for ai in self.ais:
-            ai.update(self, TICK)
+        for controller in self._controllers:
+            controller.update(self, TICK)
         self.hazard.update(self)
         for b in list(self.buildings.values()):
             b.update(self, TICK)

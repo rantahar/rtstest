@@ -8,6 +8,7 @@ import argparse
 
 import pygame
 
+from rtstest.ai import ScriptedAI
 from rtstest.sim import TICK, Game
 from rtstest.ui import HUD_HEIGHT, PANEL_HEIGHT, Camera, InputController, Renderer
 
@@ -35,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
     clock = pygame.time.Clock()
 
     game = Game(args.size, args.size, args.players, args.seed, HUMAN_PLAYER)
+    for player in game.players:
+        if player.is_ai:
+            game.add_controller(ScriptedAI(player.id))
     camera = Camera(screen.get_size(), insets=(HUD_HEIGHT, PANEL_HEIGHT))
     home = game.buildings_of(HUMAN_PLAYER)[0]
     camera.center_on(*home.center)
