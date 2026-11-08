@@ -77,26 +77,39 @@ def random_resource_near(game: Game, cell: Cell, radius: int) -> Cell | None:
     return game.nearest_resource(cell, math.inf)
 
 
-def free_cell_near(game: Game, cells: Iterable[Cell]) -> Cell | None:
-    """A passable cell next to ``cells`` (searching outwards), preferring no unit on it."""
+def free_cell_near(game: Game, cells: Iterable[Cell], toward: Cell | None = None) -> Cell | None:
+    """A passable cell next to ``cells`` (searching outwards), preferring no unit on it.
+
+    Searches ring by ring; within the nearest ring that has a candidate, the
+    cell closest to ``toward`` is chosen when given.
+    """
     grid = game.grid
-    start = set(cells)
+    layer = list(dict.fromkeys(cells))
     unit_cells = {u.cell for u in game.units.values()}
-    queue = deque(start)
-    seen = set(start)
+    seen = set(layer)
     fallback = None
-    while queue and len(seen) < FREE_CELL_SEARCH_LIMIT:
-        for n in grid.adjacent_cells(queue.popleft()):
-            if n in seen:
-                continue
-            seen.add(n)
-            queue.append(n)
-            if grid.is_passable(n):
-                if n not in unit_cells:
-                    return n
-                if fallback is None:
-                    fallback = n
+    while layer and len(seen) < FREE_CELL_SEARCH_LIMIT:
+        nxt = []
+        for c in layer:
+            for n in grid.adjacent_cells(c):
+                if n not in seen:
+                    seen.add(n)
+                    nxt.append(n)
+        passable = [n for n in nxt if grid.is_passable(n)]
+        free = [n for n in passable if n not in unit_cells]
+        if free:
+            return _closest(free, toward)
+        if passable and fallback is None:
+            fallback = _closest(passable, toward)
+        layer = nxt
     return fallback
+
+
+def _closest(cells: list[Cell], toward: Cell | None) -> Cell:
+    """The first of ``cells``, or the one nearest to ``toward`` when given."""
+    if toward is None:
+        return cells[0]
+    return min(cells, key=lambda c: math.hypot(c[0] - toward[0], c[1] - toward[1]))
 
 
 def free_cells_around(game: Game, cell: Cell, count: int) -> list[Cell]:

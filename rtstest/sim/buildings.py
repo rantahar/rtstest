@@ -9,7 +9,7 @@ and can be attacked, but trains nothing and takes no deposits.
 Up to ``MAX_QUEUE`` units can be queued for free; a unit is paid for when
 its training starts at the front of the queue, and the queue waits until the
 owner can afford it. Training takes ``train_time``, then the unit spawns on a
-free cell next to the footprint. Cancelling the front unit refunds it if it
+free cell next to the footprint, the one closest to the rally point if set. Cancelling the front unit refunds it if it
 was paid. If the building has a rally point, each new unit's first order goes
 there: gather when the rally point is a resource cell and the unit can
 gather, otherwise move.
@@ -162,7 +162,7 @@ class Building:
         self._progress += dt
         if self._progress < front.train_time:
             return
-        cell = free_cell_near(game, self.cells())
+        cell = free_cell_near(game, self.cells(), self.rally)
         if cell is not None:
             unit = game.spawn_unit(self.queue.pop(0), self.owner, cell)
             self._progress = 0.0
